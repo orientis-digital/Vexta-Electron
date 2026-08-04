@@ -2,6 +2,15 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const os = require('os')
 
+// Force application name and local userData directory to 'Vexta' across all platforms
+app.name = 'Vexta'
+try {
+  const customUserDataDir = path.join(app.getPath('appData'), 'Vexta')
+  app.setPath('userData', customUserDataDir)
+} catch {
+  // Ignore if called before app ready on certain platforms
+}
+
 function getSystemInfo() {
   const osTypeMap = {
     Linux: 'Linux',
