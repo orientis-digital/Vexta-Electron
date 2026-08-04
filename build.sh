@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Vexta-Electron All-in-One Build & Version Management Script
-# Automated Version Bumping, Prerequisite Checks, Compilation & Packaging
+# Automated Version Bumping, Prerequisite Checks, Multi-Platform Compilation (Linux & Windows)
 # ==============================================================================
 
 set -eo pipefail
@@ -27,6 +27,7 @@ BUMP_TYPE=""
 EXPLICIT_VERSION=""
 CREATE_GIT_TAG=false
 NON_INTERACTIVE=false
+TARGET_PLATFORM="linux"
 
 usage() {
     echo -e "${BOLD}Usage:${NC} $0 [OPTIONS]"
@@ -36,13 +37,16 @@ usage() {
     echo "  --bump minor         Bump minor version (e.g. 1.0.0 -> 1.1.0)"
     echo "  --bump major         Bump major version (e.g. 1.0.0 -> 2.0.0)"
     echo "  --set-version <ver>  Set exact version (e.g. 1.2.3)"
+    echo "  --target linux       Build Linux packages (AppImage, .deb, .tar.gz)"
+    echo "  --target win         Build Windows packages (.exe NSIS & Portable)"
+    echo "  --target all         Build both Linux and Windows packages"
     echo "  --tag                Create git tag v<version> on successful build"
     echo "  -y, --yes            Run non-interactively keeping default options"
     echo "  --help, -h           Show this help menu"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  ./build.sh                     # Interactive version prompt"
-    echo "  ./build.sh --bump patch        # Non-interactive patch bump"
+    echo "  ./build.sh --target win        # Build Windows .exe installers"
+    echo "  ./build.sh --target all        # Build Linux + Windows installers"
     echo "  ./build.sh --set-version 1.5.0 --tag"
     exit 0
 }
@@ -60,6 +64,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --set-version)
             EXPLICIT_VERSION="$2"
+            shift 2
+            ;;
+        --target)
+            TARGET_PLATFORM="$2"
             shift 2
             ;;
         --tag)
@@ -118,6 +126,18 @@ if [ -z "$EXPLICIT_VERSION" ] && [ -z "$BUMP_TYPE" ] && [ "$NON_INTERACTIVE" = f
             *)
                 log_info "Action selected: Keeping current version v${CURRENT_VERSION}"
                 ;;
+        esac
+
+        echo -e "\n${BOLD}Select Target Packaging Platform:${NC}"
+        echo "  1) Linux (AppImage, .deb, .tar.gz) [Default]"
+        echo "  2) Windows (.exe NSIS & Portable)"
+        echo "  3) All Platforms (Linux + Windows)"
+        echo ""
+        read -r -p "Choice [1-3] (default: 1): " PLATFORM_CHOICE
+        case "$PLATFORM_CHOICE" in
+            2) TARGET_PLATFORM="win" ;;
+            3) TARGET_PLATFORM="all" ;;
+            *) TARGET_PLATFORM="linux" ;;
         esac
     fi
 fi
@@ -216,14 +236,28 @@ npm run build
 log_success "Static application bundle compiled to ./dist"
 
 # ==============================================================================
-# STEP 6: Electron Installer Packaging
+# STEP 6: Electron Installer Packaging (Linux / Windows / All)
 # ==============================================================================
-log_step "6. Packaging Desktop Installers via electron-builder (v${CURRENT_VERSION})"
+log_step "6. Packaging Desktop Installers via electron-builder (v${CURRENT_VERSION}, target: ${TARGET_PLATFORM})"
 
 mkdir -p release
 
-log_info "Running electron-builder packaging pipeline..."
-npx electron-builder
+case "$TARGET_PLATFORM" in
+    win)
+        log_info "Running electron-builder Windows target..."
+        npx electron-builder --win nsis portable || log_warn "Windows packaging finished with warnings. Note: On 64-bit Linux hosts without wine32:i386, install build.ps1 on Windows or wine32."
+        ;;
+    all)
+        log_info "Running electron-builder Linux targets..."
+        npx electron-builder --linux
+        log_info "Running electron-builder Windows targets..."
+        npx electron-builder --win nsis portable || log_warn "Windows packaging finished with warnings."
+        ;;
+    *)
+        log_info "Running electron-builder Linux targets (AppImage, deb, tar.gz)..."
+        npx electron-builder --linux
+        ;;
+esac
 
 # Grant execution permissions to generated AppImage binaries
 if ls release/*.AppImage >/dev/null 2>&1; then
