@@ -36,6 +36,7 @@ export type DbMessage = {
   timestamp: string
   is_read: number
   timer?: string
+  reactions?: string[]
 }
 
 export type DbGroup = {
@@ -51,10 +52,36 @@ export type DbGroupMember = {
   joined_at: string
 }
 
+export type DbFileTransfer = {
+  transfer_id: string
+  filename: string
+  file_size: number
+  chunk_size: number
+  total_chunks: number
+  received_chunks: number
+  file_key: string
+  file_hash: string
+  sender: string
+  recipient: string
+  status: 'pending' | 'transferring' | 'completed' | 'cancelled'
+  created_at: string
+  cached_path?: string
+  cached_filename?: string
+}
+
 export type DbServerTrust = {
   server_host: string
   server_fingerprint: string
   trusted_at: string
+}
+
+export type DbDevice = {
+  id: string
+  name: string
+  type: 'desktop' | 'mobile'
+  hardwareHash: string
+  lastSeen: string
+  isCurrent?: boolean
 }
 
 export class VextaDatabaseManager {
@@ -83,6 +110,22 @@ export class VextaDatabaseManager {
 
     if (!localStorage.getItem(`${this.storageKey}_messages`)) {
       localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify([]))
+    }
+
+    if (!localStorage.getItem(`${this.storageKey}_groups`)) {
+      localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify([]))
+    }
+
+    if (!localStorage.getItem(`${this.storageKey}_group_members`)) {
+      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify([]))
+    }
+
+    if (!localStorage.getItem(`${this.storageKey}_file_transfers`)) {
+      localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify([]))
+    }
+
+    if (!localStorage.getItem(`${this.storageKey}_chat_timers`)) {
+      localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify({}))
     }
 
     if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
@@ -114,12 +157,76 @@ export class VextaDatabaseManager {
     localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(contacts))
   }
 
+  // ── Groups API ────────────────────────────────────────
+  getGroups(): DbGroup[] {
+    const data = localStorage.getItem(`${this.storageKey}_groups`)
+    return data ? JSON.parse(data) : []
+  }
+
+  saveGroup(group: DbGroup, members?: string[]) {
+    const groups = this.getGroups().filter((g) => g.group_id !== group.group_id)
+    groups.push(group)
+    localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify(groups))
+
+    if (members && members.length > 0) {
+      const allMembersData = localStorage.getItem(`${this.storageKey}_group_members`)
+      let allMembers: DbGroupMember[] = allMembersData ? JSON.parse(allMembersData) : []
+      allMembers = allMembers.filter((m) => m.group_id !== group.group_id)
+      for (const username of members) {
+        allMembers.push({
+          group_id: group.group_id,
+          member_username: username,
+          joined_at: new Date().toISOString(),
+        })
+      }
+      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(allMembers))
+    }
+  }
+
+  deleteGroup(groupId: string) {
+    const groups = this.getGroups().filter((g) => g.group_id !== groupId)
+    localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify(groups))
+
+    const allMembersData = localStorage.getItem(`${this.storageKey}_group_members`)
+    const allMembers: DbGroupMember[] = allMembersData ? JSON.parse(allMembersData) : []
+    const updatedMembers = allMembers.filter((m) => m.group_id !== groupId)
+    localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(updatedMembers))
+  }
+
+  getGroupMembers(groupId: string): string[] {
+    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const all: DbGroupMember[] = data ? JSON.parse(data) : []
+    return all.filter((m) => m.group_id === groupId).map((m) => m.member_username)
+  }
+
+  addGroupMember(groupId: string, memberUsername: string) {
+    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const all: DbGroupMember[] = data ? JSON.parse(data) : []
+    if (!all.some((m) => m.group_id === groupId && m.member_username === memberUsername)) {
+      all.push({
+        group_id: groupId,
+        member_username: memberUsername,
+        joined_at: new Date().toISOString(),
+      })
+      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(all))
+    }
+  }
+
+  removeGroupMember(groupId: string, memberUsername: string) {
+    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const all: DbGroupMember[] = data ? JSON.parse(data) : []
+    const updated = all.filter(
+      (m) => !(m.group_id === groupId && m.member_username === memberUsername),
+    )
+    localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(updated))
+  }
+
   // ── Messages API ──────────────────────────────────────
   getMessages(chatId: string): DbMessage[] {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
     return all.filter(
-      (m) => m.sender === chatId || m.recipient === chatId || m.recipient === `group_${chatId}`,
+      (m) => m.sender === chatId || m.recipient === chatId || m.recipient === `group_${chatId}` || m.sender === `group_${chatId}`,
     )
   }
 
@@ -135,9 +242,110 @@ export class VextaDatabaseManager {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const filtered = all.filter(
-      (m) => m.sender !== chatId && m.recipient !== chatId && m.recipient !== `group_${chatId}`,
+      (m) => m.sender !== chatId && m.recipient !== chatId && m.recipient !== `group_${chatId}` && m.sender !== `group_${chatId}`,
     )
     localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
+  }
+
+  toggleMessageReaction(msgId: number, emoji: string) {
+    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const all: DbMessage[] = data ? JSON.parse(data) : []
+    const msg = all.find((m) => m.id === msgId)
+    if (msg) {
+      const current = msg.reactions || []
+      if (current.includes(emoji)) {
+        msg.reactions = current.filter((r) => r !== emoji)
+      } else {
+        msg.reactions = [...current, emoji]
+      }
+      localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
+    }
+  }
+
+  // ── Chat Timer & Disappearing Messages API ───────────
+  getChatTimer(chatId: string): string | null {
+    const data = localStorage.getItem(`${this.storageKey}_chat_timers`)
+    const timers = data ? JSON.parse(data) : {}
+    return timers[chatId] || null
+  }
+
+  setChatTimer(chatId: string, timer: string | null) {
+    const data = localStorage.getItem(`${this.storageKey}_chat_timers`)
+    const timers = data ? JSON.parse(data) : {}
+    if (timer) {
+      timers[chatId] = timer
+    } else {
+      delete timers[chatId]
+    }
+    localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify(timers))
+  }
+
+  purgeExpiredMessages(): number {
+    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    if (!data) return 0
+    const all: DbMessage[] = JSON.parse(data)
+    const now = Date.now()
+
+    const parseDurationMs = (timerStr?: string): number | null => {
+      if (!timerStr) return null
+      const unit = timerStr.slice(-1)
+      const val = parseInt(timerStr.slice(0, -1), 10)
+      if (isNaN(val)) return null
+      if (unit === 's') return val * 1000
+      if (unit === 'm') return val * 60 * 1000
+      if (unit === 'h') return val * 3600 * 1000
+      if (unit === 'd') return val * 86400 * 1000
+      return null
+    }
+
+    const unexpired = all.filter((msg) => {
+      if (!msg.timer) return true
+      const ms = parseDurationMs(msg.timer)
+      if (!ms) return true
+      const created = new Date(msg.timestamp).getTime()
+      if (isNaN(created)) return true
+      return now - created < ms
+    })
+
+    const purgedCount = all.length - unexpired.length
+    if (purgedCount > 0) {
+      localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(unexpired))
+    }
+    return purgedCount
+  }
+
+  // ── File Transfer API ─────────────────────────────────
+  getFileTransfers(): DbFileTransfer[] {
+    const data = localStorage.getItem(`${this.storageKey}_file_transfers`)
+    return data ? JSON.parse(data) : []
+  }
+
+  getFileTransfer(transferId: string): DbFileTransfer | null {
+    return this.getFileTransfers().find((t) => t.transfer_id === transferId) || null
+  }
+
+  saveFileTransfer(transfer: DbFileTransfer) {
+    const transfers = this.getFileTransfers().filter((t) => t.transfer_id !== transfer.transfer_id)
+    transfers.push(transfer)
+    localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify(transfers))
+  }
+
+  updateFileTransferProgress(
+    transferId: string,
+    receivedChunks: number,
+    status?: DbFileTransfer['status'],
+    cachedPath?: string,
+    cachedFilename?: string,
+  ) {
+    const transfers = this.getFileTransfers()
+    const item = transfers.find((t) => t.transfer_id === transferId)
+    if (item) {
+      item.received_chunks = receivedChunks
+      if (status) item.status = status
+      if (cachedPath) item.cached_path = cachedPath
+      if (cachedFilename) item.cached_filename = cachedFilename
+      localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify(transfers))
+    }
   }
 
   // ── Server Trust API (TOFU) ──────────────────────────
@@ -154,4 +362,22 @@ export class VextaDatabaseManager {
     updated.push(trust)
     localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify(updated))
   }
+
+  // ── Devices API ──────────────────────────────────────
+  getDevices(): DbDevice[] {
+    const data = localStorage.getItem(`${this.storageKey}_devices`)
+    return data ? JSON.parse(data) : []
+  }
+
+  saveDevice(device: DbDevice) {
+    const all = this.getDevices().filter((d) => d.id !== device.id)
+    all.push(device)
+    localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
+  }
+
+  removeDevice(deviceId: string) {
+    const all = this.getDevices().filter((d) => d.id !== deviceId)
+    localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
+  }
 }
+

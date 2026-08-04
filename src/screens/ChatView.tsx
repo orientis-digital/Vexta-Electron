@@ -4,6 +4,12 @@ import ChatInfoView from './ChatInfoView'
 import { bridgeClient } from '../network/bridge'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
+  encryptFileChunk,
+  generateFileKey,
+  sliceFile,
+  stripFileMetadata,
+} from '../crypto/file_transfer'
+import {
   AttachIcon,
   CheckIcon,
   CloseIcon,
@@ -12,13 +18,21 @@ import {
   LocationIcon,
   MicIcon,
   PeopleIcon,
+  SearchIcon,
   SendIcon,
   ShieldIcon,
   TimerIcon,
   VideoIcon,
 } from '../components/icons'
+import { MarkdownMessage } from '../components/MarkdownMessage'
+import { VoiceRecorder } from '../components/VoiceRecorder'
+import { AudioPlayer } from '../components/AudioPlayer'
+import { MediaLightbox } from '../components/MediaLightbox'
+import type { LightboxItem } from '../components/MediaLightbox'
 
-type Attachment = { kind: 'file' | 'photo' | 'video'; name: string; size: string }
+import { webrtcManager } from '../network/webrtc'
+
+type Attachment = { kind: 'file' | 'photo' | 'video'; name: string; size: string; url?: string }
 type AttachmentKind = Attachment['kind']
 type AttachItemKind = AttachmentKind | 'contact' | 'location'
 
@@ -29,8 +43,11 @@ type Message = {
   me: boolean
   sender?: string
   attachment?: Attachment
-  voice?: { duration: string }
+  voiceUrl?: string
+  voiceDuration?: string
   timer?: string
+  reactions?: string[]
+  isSystem?: boolean
 }
 
 const SAMPLE_MESSAGES: Message[] = []
@@ -57,7 +74,7 @@ const ATTACH_ITEMS: {
   { kind: 'location', label: 'Location', icon: <LocationIcon size={15} />, soon: true },
 ] as const
 
-const WAVE = [8, 14, 10, 18, 12, 20, 9, 15, 7, 16, 11, 13, 6, 12, 9, 17]
+const EMOJI_REACTIONS = ['❤️', '👍', '🔥', '😮', '😂', '🎉']
 
 function isGroup(name: string) {
   return name.startsWith('group_')
@@ -71,12 +88,6 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatDuration(seconds: number) {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 function attachmentIcon(a: Attachment) {
@@ -116,18 +127,37 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   const [timer, setTimer] = useState<string | null>(null)
   const [menu, setMenu] = useState<'attach' | 'timer' | null>(null)
   const [recording, setRecording] = useState(false)
-  const [recSeconds, setRecSeconds] = useState(0)
+  const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null)
   const [pendingKind, setPendingKind] = useState<Attachment['kind']>('file')
+
+  // UI Polish States
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isDragging, setIsDragging] = useState(false)
+  const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<number | null>(null)
 
   const nextId = useRef(SAMPLE_MESSAGES.length + 1)
   const listRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setMenu(null)
+    setTimer(null)
+    setRecording(false)
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [chatId, name])
 
   useEffect(() => {
     const activeUser = localStorage.getItem('vexta_active_user') || ''
     if (activeUser && name) {
       const db = new VextaDatabaseManager(activeUser)
+      const savedTimer = db.getChatTimer(name)
+      if (savedTimer) setTimer(savedTimer)
+
       const dbMsgs = db.getMessages(name)
       const formatted: Message[] = dbMsgs.map((m, idx) => ({
         id: idx + 1,
@@ -135,18 +165,13 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         timestamp: m.timestamp,
         me: m.sender === activeUser,
         sender: m.sender,
+        timer: m.timer,
       }))
       setMessages(formatted)
     } else {
       setMessages([])
     }
-    setDraft('')
-    setAttachment(null)
-    setTimer(null)
-    setMenu(null)
-    setRecording(false)
-    setRecSeconds(0)
-  }, [chatId, name])
+  }, [name])
 
   useEffect(() => {
     const unsubscribe = bridgeClient.subscribeMessages((msg) => {
@@ -176,38 +201,111 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages])
 
-  useEffect(() => {
-    if (!recording) return
-    const id = setInterval(() => setRecSeconds((s) => s + 1), 1000)
-    return () => clearInterval(id)
-  }, [recording])
-
   function openPicker(kind: AttachItemKind) {
     if (kind === 'contact' || kind === 'location') return
     setPendingKind(kind)
-    const input = fileRef.current
+    setMenu(null)
+
+    const input = fileInputRef.current
     if (!input) return
-    input.accept = kind === 'photo' ? 'image/*' : kind === 'video' ? 'video/*' : ''
-    input.value = ''
+
+    if (kind === 'photo') input.accept = 'image/*'
+    else if (kind === 'video') input.accept = 'video/*'
+    else input.accept = '*/*'
+
     input.click()
   }
 
-  function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) {
-      setAttachment({ kind: pendingKind, name: file.name, size: formatBytes(file.size) })
-    }
-    setMenu(null)
+    if (!file) return
+
+    setSelectedFileObj(file)
+    setAttachment({
+      kind: pendingKind,
+      name: file.name,
+      size: formatBytes(file.size),
+      url: file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : undefined,
+    })
+
+    e.target.value = ''
   }
 
-  function send() {
+  // Drag & Drop File Handler
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (!isGlobal) setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    if (isGlobal) return
+
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+
+    const kind: AttachmentKind = file.type.startsWith('image/')
+      ? 'photo'
+      : file.type.startsWith('video/')
+        ? 'video'
+        : 'file'
+
+    setSelectedFileObj(file)
+    setPendingKind(kind)
+    setAttachment({
+      kind,
+      name: file.name,
+      size: formatBytes(file.size),
+      url: file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : undefined,
+    })
+  }
+
+  async function send() {
     const text = draft.trim()
     if (!text && !attachment) return
 
-    // Relay ciphertext blob over live WebSocket connection
-    bridgeClient.sendBlindMessage(name, btoa(text || ''))
-
     const activeUser = localStorage.getItem('vexta_active_user') || ''
+
+    if (isGroup(chatId)) {
+      const db = new VextaDatabaseManager(activeUser)
+      const members = db.getGroupMembers(name)
+      bridgeClient.sendGroupMessage(name, members, text || attachment?.name || '')
+    } else {
+      bridgeClient.sendBlindMessage(name, btoa(text || ''))
+    }
+
+    if (selectedFileObj) {
+      try {
+        const { cleanBlob, cleanFilename } = await stripFileMetadata(selectedFileObj)
+        const fileKey = generateFileKey()
+        const { chunks, fileHash } = await sliceFile(cleanBlob)
+        const transferId = `tf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+
+        bridgeClient.sendFileInit(name, {
+          transfer_id: transferId,
+          filename: cleanFilename,
+          file_size: cleanBlob.size,
+          chunk_size: 128 * 1024,
+          total_chunks: chunks.length,
+          file_key: fileKey,
+          file_hash: fileHash,
+        })
+
+        for (let i = 0; i < chunks.length; i++) {
+          const encChunk = await encryptFileChunk(fileKey, chunks[i])
+          bridgeClient.sendFileChunk(name, transferId, i, encChunk)
+        }
+      } catch (err) {
+        console.warn('[Vexta File Transfer] Error encrypting/sending file:', err)
+      }
+    }
+
     if (activeUser && (text || attachment)) {
       try {
         const db = new VextaDatabaseManager(activeUser)
@@ -217,6 +315,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           ciphertext: text || attachment?.name || 'Attachment',
           timestamp: new Date().toISOString(),
           is_read: 1,
+          timer: timer || undefined,
         })
       } catch (e) {
         console.warn('[Vexta DB] Error saving outbound message:', e)
@@ -236,6 +335,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     ])
     setDraft('')
     setAttachment(null)
+    setSelectedFileObj(null)
     const field = fieldRef.current
     if (field) {
       field.style.height = 'auto'
@@ -243,29 +343,57 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     }
   }
 
-  function sendVoice() {
+  // Send Audio Voice Note
+  async function handleSendVoiceBlob(audioBlob: Blob) {
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    const voiceUrl = URL.createObjectURL(audioBlob)
+
+    try {
+      const fileKey = generateFileKey()
+      const { chunks, fileHash } = await sliceFile(audioBlob)
+      const transferId = `tf_voice_${Date.now()}`
+
+      bridgeClient.sendFileInit(name, {
+        transfer_id: transferId,
+        filename: `voice_${Date.now()}.webm`,
+        file_size: audioBlob.size,
+        chunk_size: 128 * 1024,
+        total_chunks: chunks.length,
+        file_key: fileKey,
+        file_hash: fileHash,
+      })
+
+      for (let i = 0; i < chunks.length; i++) {
+        const encChunk = await encryptFileChunk(fileKey, chunks[i])
+        bridgeClient.sendFileChunk(name, transferId, i, encChunk)
+      }
+
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        db.saveMessage({
+          sender: activeUser,
+          recipient: name,
+          ciphertext: `🎤 Voice note (${Math.round(audioBlob.size / 1024)} KB)`,
+          timestamp: new Date().toISOString(),
+          is_read: 1,
+        })
+      }
+    } catch (err) {
+      console.warn('[Voice Send Error]', err)
+    }
+
     setMessages((prev) => [
       ...prev,
       {
         id: nextId.current++,
         timestamp: nowTimestamp(),
         me: true,
-        voice: { duration: formatDuration(recSeconds) },
+        voiceUrl,
         timer: timer || undefined,
       },
     ])
-    setRecording(false)
-    setRecSeconds(0)
-  }
 
-  function startRec() {
-    setRecSeconds(0)
-    setRecording(true)
-  }
-
-  function cancelRec() {
     setRecording(false)
-    setRecSeconds(0)
   }
 
   function autoGrow(el: HTMLTextAreaElement) {
@@ -281,77 +409,268 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     }
   }
 
-  const sendDisabled = isGlobal || (!draft.trim() && !attachment && !recording)
+  function addReaction(msgId: number, emoji: string) {
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.toggleMessageReaction(msgId, emoji)
+    }
+
+    bridgeClient.sendReaction(name, msgId, emoji)
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id === msgId) {
+          const current = m.reactions || []
+          const updated = current.includes(emoji)
+            ? current.filter((r) => r !== emoji)
+            : [...current, emoji]
+          return { ...m, reactions: updated }
+        }
+        return m
+      }),
+    )
+    setActiveReactionMsgId(null)
+  }
+
+  function openMediaLightbox(currentMsg: Message) {
+    const items: LightboxItem[] = []
+    let initialIdx = 0
+
+    messages.forEach((m) => {
+      if (m.attachment && (m.attachment.kind === 'photo' || m.attachment.kind === 'video')) {
+        const isTarget = m.id === currentMsg.id
+        if (isTarget) initialIdx = items.length
+        items.push({
+          url: m.attachment.url || '',
+          filename: m.attachment.name,
+          type: m.attachment.kind === 'photo' ? 'image' : 'video',
+        })
+      }
+    })
+
+    if (items.length > 0) {
+      setLightboxItems(items)
+      setLightboxIndex(initialIdx)
+    }
+  }
+
+  const filteredMessages = messages.filter((m) => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      (m.text && m.text.toLowerCase().includes(q)) ||
+      (m.attachment && m.attachment.name.toLowerCase().includes(q))
+    );
+  })
 
   return (
-    <div className="chat-layout-wrapper">
-      <div className="chat wallpaper-default">
-        <header className="chat-header">
-          <span className="avatar">
-            {isGlobal
-              ? '\u{1F4E2}'
-              : isGroup(chatId)
-                ? '\u{1F465}'
-                : name.charAt(0).toUpperCase()}
+    <div
+      className={`screen-pane chat-view ${isDragging ? 'dragging' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={handleFileSelected}
+      />
+
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <div className="drag-overlay">
+          <div className="drag-overlay-card">
+            <AttachIcon size={32} className="accent-icon" />
+            <h3>Drop Files Here</h3>
+            <p>Files will be encrypted and sent via Vexta Zero-Knowledge Transfer</p>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Header */}
+      <div className="pane-header chat-header">
+        <div className="peer-title">
+          <h2>{name}</h2>
+          <span className="mono-sub">
+            <ShieldIcon size={12} /> {subtitle}
           </span>
-          <span className="chat-title">
-            <span className="chat-name">{name}</span>
-            <span className="chat-sub">{subtitle}</span>
-          </span>
+        </div>
+
+        <div className="header-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="Start Voice Call"
+            disabled={isGlobal}
+            onClick={() => webrtcManager.initiateCall(name, isGroup(chatId), false)}
+          >
+            <MicIcon size={18} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Start Video Call"
+            disabled={isGlobal}
+            onClick={() => webrtcManager.initiateCall(name, isGroup(chatId), true)}
+          >
+            <VideoIcon size={18} />
+          </button>
+          <button
+            type="button"
+            className={`icon-btn ${searchOpen ? 'active' : ''}`}
+            title="Search Messages"
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
+            <SearchIcon size={18} />
+          </button>
           <button
             type="button"
             className={`icon-btn ${infoOpen ? 'active' : ''}`}
-            title="Chat info"
+            title={infoOpen ? 'Hide channel info' : 'Channel info'}
             onClick={toggleInfo}
           >
-            <InfoIcon size={17} />
+            <InfoIcon size={18} />
           </button>
-        </header>
-
-      <div className="messages" ref={listRef}>
-        <div className="date-sep">
-          <span>Today</span>
         </div>
-        {messages.map((m) => (
-          <div key={m.id} className={`msg-row ${m.me ? 'me' : ''}`}>
-            <div className={`bubble ${m.me ? 'outgoing' : 'incoming'}`}>
-              {!m.me && <span className="sender">{m.sender}</span>}
-              {m.voice ? (
-                <div className="voice-msg">
-                  <span className="voice-play">{'\u25B6'}</span>
-                  <span className="voice-wave" aria-hidden="true">
-                    {WAVE.map((h, i) => (
-                      <i key={i} style={{ height: `${h}px` }} />
+      </div>
+
+      {/* Search Bar */}
+      {searchOpen && (
+        <div className="chat-search-bar">
+          <input
+            type="text"
+            className="modal-input"
+            placeholder="Search decrypted messages..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setSearchQuery('')}
+            >
+              <CloseIcon size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="chat-body" ref={listRef}>
+        <div className="chat-banner">
+          <ShieldIcon size={16} />
+          <span>
+            {isGlobal
+              ? 'Official broadcast channel. Messages are cryptographically signed by Vexta Network.'
+              : 'Messages and media are end-to-end encrypted with zero-knowledge keys.'}
+          </span>
+        </div>
+
+        {filteredMessages.map((m) =>
+          m.isSystem ? (
+            <div key={m.id} className="system-msg-row">
+              <span className="system-msg-pill">📢 {m.text}</span>
+            </div>
+          ) : (
+            <div
+              key={m.id}
+              className={`msg-row ${m.me ? 'me' : 'them'}`}
+              onMouseLeave={() => setActiveReactionMsgId(null)}
+            >
+            {!m.me && isGroup(chatId) && (
+              <span className="sender-label">{m.sender || 'Peer'}</span>
+            )}
+            <div className="bubble-wrapper">
+              <div className={`bubble ${m.me ? 'me' : 'them'}`}>
+                {/* Reaction Picker Bar */}
+                <button
+                  type="button"
+                  className="reaction-trigger-btn"
+                  title="Add reaction"
+                  onClick={() =>
+                    setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)
+                  }
+                >
+                  +
+                </button>
+
+                {activeReactionMsgId === m.id && (
+                  <div className="emoji-reaction-picker">
+                    {EMOJI_REACTIONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="emoji-btn"
+                        onClick={() => addReaction(m.id, emoji)}
+                      >
+                        {emoji}
+                      </button>
                     ))}
-                  </span>
-                  <span className="voice-dur">{m.voice.duration}</span>
-                </div>
-              ) : (
-                <>
-                  {m.attachment && (
-                    <div className="file-card">
-                      <span className="file-icon">{attachmentIcon(m.attachment)}</span>
-                      <span className="file-meta">
-                        <b>{m.attachment.name}</b>
-                        <small>
-                          {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
-                        </small>
+                  </div>
+                )}
+
+                {/* Voice Note Audio Player */}
+                {m.voiceUrl ? (
+                  <AudioPlayer src={m.voiceUrl} />
+                ) : (
+                  <>
+                    {/* Attachments */}
+                    {m.attachment && (
+                      <div
+                        className={`file-card ${m.attachment.url ? 'clickable-media' : ''}`}
+                        onClick={() => m.attachment?.url && openMediaLightbox(m)}
+                      >
+                        {m.attachment.url && m.attachment.kind === 'photo' ? (
+                          <img
+                            src={m.attachment.url}
+                            alt={m.attachment.name}
+                            className="chat-img-thumb"
+                          />
+                        ) : (
+                          <>
+                            <span className="file-icon">{attachmentIcon(m.attachment)}</span>
+                            <span className="file-meta">
+                              <b>{m.attachment.name}</b>
+                              <small>
+                                {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
+                              </small>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Markdown Message Content */}
+                    {m.text && <MarkdownMessage content={m.text} />}
+                  </>
+                )}
+
+                <span className="meta">
+                  {m.me && <span className="check">{'\u2713\u2713'}</span>}
+                  {m.timer && <span className="timer">{'\u23F1'}</span>}
+                  {m.timestamp}
+                </span>
+
+                {/* Reaction Badges */}
+                {m.reactions && m.reactions.length > 0 && (
+                  <div className="msg-reactions-list">
+                    {m.reactions.map((r, idx) => (
+                      <span key={idx} className="reaction-badge">
+                        {r}
                       </span>
-                    </div>
-                  )}
-                  {m.text && <span className="body">{m.text}</span>}
-                </>
-              )}
-              <span className="meta">
-                {m.me && <span className="check">{'\u2713\u2713'}</span>}
-                {m.timer && <span className="timer">{'\u23F1'}</span>}
-                {m.timestamp}
-              </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ))}
       </div>
 
+      {/* Composer */}
       <div className="composer-wrap">
         {attachment && (
           <div className="attach-chip">
@@ -374,25 +693,24 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         )}
 
         <div className="composer-row">
-          <form
-            className="chat-input"
-            onSubmit={(e) => {
-              e.preventDefault()
-              send()
-            }}
-          >
-            {recording ? (
-              <span className="rec-bar">
-                <span className="rec-dot" />
-                <span className="rec-timer">{formatDuration(recSeconds)}</span>
-                <span className="rec-hint">Recording</span>
-              </span>
-            ) : (
-              <>
+          {recording ? (
+            <VoiceRecorder
+              onSend={handleSendVoiceBlob}
+              onCancel={() => setRecording(false)}
+            />
+          ) : (
+            <>
+              <form
+                className="chat-input"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  send()
+                }}
+              >
                 <button
                   type="button"
                   className="icon-btn"
-                  title="Attach"
+                  title="Attach File"
                   disabled={isGlobal}
                   onClick={() => setMenu(menu === 'attach' ? null : 'attach')}
                 >
@@ -414,7 +732,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                   placeholder={
                     isGlobal
                       ? 'System channel — announcements only'
-                      : `Type a message${isGroup(chatId) ? ' to group' : ''}...`
+                      : `Type a message (*italic*, **bold**, \`code\`, ||spoiler||)...`
                   }
                   disabled={isGlobal}
                   rows={1}
@@ -430,107 +748,91 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                   <TimerIcon size={17} />
                   {timer && <span className="timer-badge">{timer}</span>}
                 </button>
-              </>
-            )}
-          </form>
+              </form>
 
-          <div className="composer-actions">
-            <button
-              type="button"
-              className={`icon-btn ${recording ? 'rec-cancel' : ''}`}
-              title={recording ? 'Cancel recording' : 'Voice message'}
-              disabled={isGlobal}
-              onClick={recording ? cancelRec : startRec}
-            >
-              {recording ? <CloseIcon size={18} /> : <MicIcon size={18} />}
-            </button>
-            <button
-              type="button"
-              className="send-btn"
-              title={recording ? 'Send voice message' : 'Send'}
-              disabled={sendDisabled}
-              onClick={recording ? sendVoice : send}
-            >
-              {recording ? <CheckIcon size={17} /> : <SendIcon size={17} />}
-            </button>
-          </div>
-        </div>
-
-        <p className="chat-input-hint">
-          <ShieldIcon size={10} />
-          End-to-end encrypted
-          <span aria-hidden="true">&middot;</span>
-          {timer ? (
-            <>
-              Disappearing messages: <b>{timer}</b>
-            </>
-          ) : (
-            <>
-              Enter to send <span aria-hidden="true">&middot;</span> Shift+Enter for new line
+              <div className="composer-actions">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Record Voice Note"
+                  disabled={isGlobal}
+                  onClick={() => setRecording(true)}
+                >
+                  <MicIcon size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="send-btn"
+                  title="Send message"
+                  disabled={isGlobal || (!draft.trim() && !attachment)}
+                  onClick={send}
+                >
+                  <SendIcon size={16} />
+                </button>
+              </div>
             </>
           )}
-        </p>
+        </div>
 
-        <input
-          ref={fileRef}
-          type="file"
-          style={{ display: 'none' }}
-          onChange={onFilePicked}
-        />
-
+        {/* Attachment Menu */}
         {menu === 'attach' && (
-          <>
-            <div className="menu-backdrop" onClick={() => setMenu(null)} />
-            <div className="menu attach">
-              {ATTACH_ITEMS.map((item) => (
-                <button
-                  key={item.kind}
-                  type="button"
-                  className="menu-item"
-                  disabled={item.soon}
-                  onClick={() => openPicker(item.kind)}
-                >
-                  {item.icon}
-                  {item.label}
-                  {item.soon && <span className="menu-note">soon</span>}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="popover attach-menu">
+            {ATTACH_ITEMS.map((item) => (
+              <button
+                key={item.kind}
+                type="button"
+                className={`attach-item ${item.soon ? 'soon' : ''}`}
+                disabled={item.soon}
+                onClick={() => openPicker(item.kind)}
+              >
+                <span className="icon">{item.icon}</span>
+                <span className="label">{item.label}</span>
+                {item.soon && <span className="tag">Soon</span>}
+              </button>
+            ))}
+          </div>
         )}
 
+        {/* Disappearing Messages Timer Menu */}
         {menu === 'timer' && (
-          <>
-            <div className="menu-backdrop" onClick={() => setMenu(null)} />
-            <div className="menu timer">
-              {TIMER_OPTIONS.map((opt) => (
-                <button
-                  key={opt.label}
-                  type="button"
-                  className="menu-item"
-                  onClick={() => {
-                    setTimer(opt.value)
-                    setMenu(null)
-                  }}
-                >
-                  {opt.label}
-                  <span className="menu-check">{timer === opt.value ? '\u2713' : ''}</span>
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="popover timer-menu">
+            <div className="popover-title">Disappearing Messages</div>
+            {TIMER_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                className={`timer-item ${timer === opt.value ? 'selected' : ''}`}
+                onClick={() => {
+                  setTimer(opt.value)
+                  setMenu(null)
+                  const activeUser = localStorage.getItem('vexta_active_user') || ''
+                  if (activeUser && name) {
+                    const db = new VextaDatabaseManager(activeUser)
+                    db.setChatTimer(name, opt.value)
+                  }
+                }}
+              >
+                <span>{opt.label}</span>
+                {timer === opt.value && <CheckIcon size={14} />}
+              </button>
+            ))}
+          </div>
         )}
       </div>
-    </div>
 
-    <aside className={`chat-info-drawer ${infoOpen ? 'open' : ''}`}>
-      <ChatInfoView
-        chatId={chatId}
-        onClose={() => navigate(`/chat/${encodeURIComponent(chatId)}`)}
-      />
-    </aside>
-  </div>
-)
+      {/* Info View Sidebar */}
+      {infoOpen && <ChatInfoView />}
+
+      {/* Full-Screen Media Lightbox Overlay */}
+      {lightboxIndex !== null && (
+        <MediaLightbox
+          items={lightboxItems}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </div>
+  )
 }
 
 export default ChatView

@@ -4,6 +4,8 @@ import {
   signNonceRSA_PSS,
 } from '../crypto/identity'
 import { VextaDatabaseManager } from '../crypto/db_manager'
+import type { DbFileTransfer } from '../crypto/db_manager'
+import { cacheReceivedMedia, decryptFileChunk } from '../crypto/file_transfer'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -63,6 +65,7 @@ export class SubstrataBridgeClient {
 
   private listeners: Set<(status: BridgeStatus) => void> = new Set()
   private messageListeners: Set<(msg: BlindMessagePayload) => void> = new Set()
+  private chunkStorePrefix = 'vexta_chunks_'
 
   constructor(defaultUrl?: string) {
     const savedUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('vexta_bridge_url') : null
@@ -195,13 +198,125 @@ export class SubstrataBridgeClient {
           try {
             if (payload.wire_blob) text = atob(payload.wire_blob)
           } catch {}
-          db.saveMessage({
-            sender: payload.sender,
-            recipient: payload.recipient,
-            ciphertext: text,
-            timestamp: payload.timestamp || new Date().toISOString(),
-            is_read: 0,
-          })
+
+          let innerPayload: any = null
+          try {
+            innerPayload = JSON.parse(text)
+          } catch {
+            innerPayload = null
+          }
+
+          if (innerPayload && typeof innerPayload === 'object') {
+            if (innerPayload.type === 'group_msg') {
+              db.saveMessage({
+                sender: `group_${innerPayload.group_uuid}`,
+                recipient: activeUser,
+                ciphertext: innerPayload.body || text,
+                timestamp: payload.timestamp || new Date().toISOString(),
+                is_read: 0,
+              })
+            } else if (innerPayload.type === 'group_invite') {
+              db.saveGroup({
+                group_id: innerPayload.group_uuid,
+                group_name: innerPayload.group_name || 'Group Chat',
+                creator: payload.sender,
+                created_at: payload.timestamp || new Date().toISOString(),
+              }, innerPayload.members || [payload.sender, activeUser])
+            } else if (innerPayload.type === 'group_update') {
+              db.saveGroup({
+                group_id: innerPayload.group_uuid,
+                group_name: innerPayload.group_name || 'Group Chat',
+                creator: payload.sender,
+                created_at: payload.timestamp || new Date().toISOString(),
+              }, innerPayload.members)
+            } else if (innerPayload.type === 'group_kick') {
+              db.deleteGroup(innerPayload.group_uuid)
+            } else if (innerPayload.type === 'file_init') {
+              db.saveFileTransfer({
+                transfer_id: innerPayload.transfer_id,
+                filename: innerPayload.filename,
+                file_size: innerPayload.file_size,
+                chunk_size: innerPayload.chunk_size || 128 * 1024,
+                total_chunks: innerPayload.total_chunks,
+                received_chunks: 0,
+                file_key: innerPayload.file_key,
+                file_hash: innerPayload.file_hash,
+                sender: payload.sender,
+                recipient: activeUser,
+                status: 'pending',
+                created_at: payload.timestamp || new Date().toISOString(),
+              })
+            } else if (innerPayload.type === 'file_chunk') {
+              const transfer = db.getFileTransfer(innerPayload.transfer_id)
+              if (transfer) {
+                // Store received chunk data for reassembly
+                const chunkKey = `${this.chunkStorePrefix}${innerPayload.transfer_id}`
+                const storedChunks: string[] = JSON.parse(localStorage.getItem(chunkKey) || '[]')
+                storedChunks[innerPayload.chunk_index || storedChunks.length] = innerPayload.data
+                localStorage.setItem(chunkKey, JSON.stringify(storedChunks))
+
+                const nextChunk = Math.min(transfer.total_chunks, (innerPayload.chunk_index || 0) + 1)
+                const isComplete = nextChunk >= transfer.total_chunks
+
+                if (isComplete) {
+                  // Auto-cache completed file to hidden OS location
+                  this.cacheCompletedTransfer(db, transfer, storedChunks)
+                    .then(() => localStorage.removeItem(chunkKey))
+                    .catch((err) => console.warn('[Substrata WSS] Cache failed:', err))
+                }
+
+                db.updateFileTransferProgress(
+                  innerPayload.transfer_id,
+                  nextChunk,
+                  isComplete ? 'completed' : 'transferring',
+                )
+              }
+            } else if (innerPayload.type === 'file_status_query') {
+              const transfer = db.getFileTransfer(innerPayload.transfer_id)
+              if (transfer) {
+                this.sendFileStatusResponse(
+                  payload.sender,
+                  innerPayload.transfer_id,
+                  transfer.received_chunks,
+                  transfer.status,
+                )
+              }
+            } else if (innerPayload.type === 'file_status_response') {
+              console.log(
+                `[Substrata WSS] Resume status for ${innerPayload.transfer_id}: ${innerPayload.received_chunks}/${innerPayload.status}`,
+              )
+            } else if (innerPayload.type === 'message_reaction') {
+              if (innerPayload.target_msg_id && innerPayload.emoji) {
+                db.toggleMessageReaction(Number(innerPayload.target_msg_id), innerPayload.emoji)
+              }
+            } else if (innerPayload.type === 'metadata_sync') {
+              if (innerPayload.action === 'ADD_CONTACT') {
+                db.addContact(innerPayload.data)
+              } else if (innerPayload.action === 'DELETE_CONTACT') {
+                db.removeContact(innerPayload.data.username)
+              } else if (innerPayload.action === 'CREATE_GROUP') {
+                db.saveGroup(innerPayload.data.group, innerPayload.data.members)
+              } else if (innerPayload.action === 'DELETE_GROUP') {
+                db.deleteGroup(innerPayload.data.groupId)
+              }
+            } else {
+              db.saveMessage({
+                sender: payload.sender,
+                recipient: payload.recipient,
+                ciphertext: text,
+                timestamp: payload.timestamp || new Date().toISOString(),
+                is_read: 0,
+              })
+            }
+          } else {
+            db.saveMessage({
+              sender: payload.sender,
+              recipient: payload.recipient,
+              ciphertext: text,
+              timestamp: payload.timestamp || new Date().toISOString(),
+              is_read: 0,
+            })
+          }
         } catch (e) {
           console.warn(`[Substrata WSS] Failed saving inbound message to DB:`, e)
         }
@@ -323,6 +438,189 @@ export class SubstrataBridgeClient {
     console.log(`[Substrata WSS] Transmitting SEND_MESSAGE to @${recipient}`)
     this.sendJson(msg)
     return true
+  }
+
+  // ── Group Chat & File Transfer Extensions ─────────────────
+  sendGroupMessage(groupId: string, members: string[], bodyText: string) {
+    const activeUser = localStorage.getItem('vexta_active_user') || 'self'
+    const innerPayload = JSON.stringify({
+      type: 'group_msg',
+      group_uuid: groupId,
+      sender: activeUser,
+      body: bodyText,
+    })
+    const b64Payload = btoa(innerPayload)
+
+    for (const member of members) {
+      if (member !== activeUser) {
+        this.sendBlindMessage(member, b64Payload)
+      }
+    }
+  }
+
+  sendGroupInvite(groupId: string, groupName: string, recipient: string, members: string[]) {
+    const innerPayload = JSON.stringify({
+      type: 'group_invite',
+      group_uuid: groupId,
+      group_name: groupName,
+      members,
+    })
+    this.sendBlindMessage(recipient, btoa(innerPayload))
+  }
+
+  sendFileInit(recipient: string, initPayload: {
+    transfer_id: string
+    filename: string
+    file_size: number
+    chunk_size: number
+    total_chunks: number
+    file_key: string
+    file_hash: string
+  }) {
+    const payload = JSON.stringify({
+      type: 'file_init',
+      ...initPayload,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendFileChunk(recipient: string, transferId: string, chunkIndex: number, encryptedChunkB64: string) {
+    const payload = JSON.stringify({
+      type: 'file_chunk',
+      transfer_id: transferId,
+      chunk_index: chunkIndex,
+      data: encryptedChunkB64,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendFileStatusQuery(recipient: string, transferId: string) {
+    const payload = JSON.stringify({
+      type: 'file_status_query',
+      transfer_id: transferId,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendFileStatusResponse(recipient: string, transferId: string, receivedChunks: number, status: string) {
+    const payload = JSON.stringify({
+      type: 'file_status_response',
+      transfer_id: transferId,
+      received_chunks: receivedChunks,
+      status,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendMetadataSync(
+    action:
+      | 'ADD_CONTACT'
+      | 'DELETE_CONTACT'
+      | 'CREATE_GROUP'
+      | 'DELETE_GROUP'
+      | 'UPDATE_GROUP_MEMBERS'
+      | 'REVOKE_DEVICE',
+    data: any,
+  ) {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (!activeUser) return
+    const payload = JSON.stringify({
+      type: 'metadata_sync',
+      action,
+      data,
+    })
+    const wireBlob = btoa(`SYNC_META:${payload}`)
+    this.sendBlindMessage(activeUser, wireBlob)
+  }
+
+  sendReaction(
+    recipient: string,
+    targetMsgId: number | string,
+    emoji: string,
+    action: 'add' | 'remove' = 'add',
+  ) {
+    const payload = JSON.stringify({
+      type: 'message_reaction',
+      target_msg_id: targetMsgId,
+      emoji,
+      action,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendCallOffer(recipient: string, sdp: any, isGroup = false, isVideo = false) {
+    const payload = JSON.stringify({
+      type: 'call_offer',
+      sdp,
+      is_group: isGroup,
+      is_video: isVideo,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendCallAnswer(recipient: string, sdp: any) {
+    const payload = JSON.stringify({
+      type: 'call_answer',
+      sdp,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendIceCandidate(recipient: string, candidate: any) {
+    const payload = JSON.stringify({
+      type: 'call_ice',
+      candidate,
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  sendCallEnd(recipient: string) {
+    const payload = JSON.stringify({
+      type: 'call_end',
+    })
+    this.sendBlindMessage(recipient, btoa(payload))
+  }
+
+  private async cacheCompletedTransfer(
+    db: VextaDatabaseManager,
+    transfer: DbFileTransfer,
+    encryptedChunksB64: string[],
+  ) {
+    try {
+      const decryptedChunks: Uint8Array[] = []
+      for (const b64 of encryptedChunksB64) {
+        if (!b64) continue
+        const chunk = await decryptFileChunk(transfer.file_key, b64)
+        decryptedChunks.push(chunk)
+      }
+
+      const mimeType = transfer.filename.match(/\.(jpe?g)$/i)
+        ? 'image/jpeg'
+        : transfer.filename.match(/\.png$/i)
+          ? 'image/png'
+          : transfer.filename.match(/\.gif$/i)
+            ? 'image/gif'
+            : transfer.filename.match(/\.webp$/i)
+              ? 'image/webp'
+              : 'application/octet-stream'
+
+      const blobParts: BlobPart[] = decryptedChunks.map(
+        (c) => c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength) as ArrayBuffer,
+      )
+      const blob = new Blob(blobParts, { type: mimeType })
+      const { cachedFilename, cachedPath } = await cacheReceivedMedia(blob, transfer.filename)
+
+      db.updateFileTransferProgress(
+        transfer.transfer_id,
+        transfer.total_chunks,
+        'completed',
+        cachedPath,
+        cachedFilename,
+      )
+      console.log(`[Substrata WSS] Cached file ${transfer.filename} → ${cachedFilename}`)
+    } catch (err) {
+      console.error('[Substrata WSS] Failed to cache completed transfer:', err)
+    }
   }
 
   // ── Substrata Extended Protocol Frame Helpers ───────────────

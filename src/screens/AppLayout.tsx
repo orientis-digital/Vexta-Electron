@@ -16,6 +16,7 @@ import {
 } from '../components/icons'
 
 import { VextaDatabaseManager } from '../crypto/db_manager'
+import { CallModal } from '../components/CallModal'
 
 const AVATAR_PALETTE = [
   '#39ff14',
@@ -40,13 +41,23 @@ function loadUserContacts(): Contact[] {
   const activeUser = localStorage.getItem('vexta_active_user') || ''
   if (!activeUser) return []
   const db = new VextaDatabaseManager(activeUser)
-  const raw = db.getContacts()
-  return raw.map((c) => ({
+
+  const directContacts = db.getContacts().map((c) => ({
     name: c.username,
     subtitle: c.username === 'Vexta - Global Message' ? 'System channel' : 'End-to-end encrypted',
     time: 'Recent',
     online: c.status === 'active',
   }))
+
+  const groupContacts = db.getGroups().map((g) => ({
+    name: g.group_name,
+    subtitle: 'E2EE Group Chat',
+    time: 'Group',
+    group: true,
+    online: true,
+  }))
+
+  return [...groupContacts, ...directContacts]
 }
 
 function avatarStyle(name: string, group?: boolean) {
@@ -146,12 +157,36 @@ function AppLayout() {
   function createGroup() {
     const name = groupName.trim()
     if (!name || members.size === 0) return
+    const activeUser = localStorage.getItem('vexta_active_user') || 'self'
+    const memberList = Array.from(members)
+    if (!memberList.includes(activeUser)) memberList.push(activeUser)
+
+    const groupId = name.toLowerCase().replace(/\s+/g, '_')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.saveGroup(
+        {
+          group_id: groupId,
+          group_name: name,
+          creator: activeUser,
+          created_at: new Date().toISOString(),
+        },
+        memberList,
+      )
+
+      for (const m of memberList) {
+        if (m !== activeUser) {
+          bridgeClient.sendGroupInvite(groupId, name, m, memberList)
+        }
+      }
+    }
+
     const newContact: Contact = {
       name,
       subtitle: 'E2EE Group Chat',
       time: 'now',
       group: true,
-      online: false,
+      online: true,
     }
     setContacts((prev) => [newContact, ...prev])
     setGroupName('')
@@ -428,6 +463,9 @@ function AppLayout() {
           </div>
         </div>
       )}
+
+      {/* Global E2EE WebRTC Call Overlay */}
+      <CallModal />
     </div>
   )
 }
