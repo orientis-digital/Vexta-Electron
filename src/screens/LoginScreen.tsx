@@ -7,6 +7,8 @@ import {
 } from '../crypto/auth'
 import { AuthSession } from '../crypto/session'
 
+import { hashPasscode } from '../crypto/vault_backup'
+
 function SectionDivider({ label }: { label?: string }) {
   return (
     <div className="section-divider">
@@ -44,6 +46,22 @@ function LoginScreen() {
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault()
     setAuthError(null)
+
+    // Check for Duress Emergency Wipe Passcode trigger
+    const duressHash = localStorage.getItem('vexta_duress_passcode_hash')
+    if (duressHash && password) {
+      const inputHash = await hashPasscode(password)
+      if (inputHash === duressHash) {
+        AuthSession.logout()
+        localStorage.clear()
+        setAuthError('EMERGENCY WIPE TRIGGERED: All local vault data wiped successfully.')
+        setPassword('')
+        setTimeout(() => {
+          window.location.reload()
+        }, 1500)
+        return
+      }
+    }
 
     const result = await AuthSession.login(activeUsername, password)
     if (!result.success) {

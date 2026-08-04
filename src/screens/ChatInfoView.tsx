@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   CheckIcon,
   ChevronIcon,
@@ -105,6 +106,7 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
   ])
   const [newMemberName, setNewMemberName] = useState('')
   const [addMemberOpen, setAddMemberOpen] = useState(false)
+  const [sharedTransfers, setSharedTransfers] = useState<any[]>([])
 
   // Modals state
   const [clearHistoryOpen, setClearHistoryOpen] = useState(false)
@@ -133,6 +135,44 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Load saved timer, group members, and shared file transfers from Database
+  useEffect(() => {
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (!activeUser || !name) return
+    const db = new VextaDatabaseManager(activeUser)
+
+    const transfers = db.getFileTransfers().filter(
+      (t) => t.sender === name || t.recipient === name,
+    )
+    setSharedTransfers(transfers)
+
+    const savedTimer = db.getChatTimer(name)
+    if (savedTimer) setTimer(savedTimer)
+
+    if (isGroup) {
+      const dbMembers = db.getGroupMembers(name)
+      if (dbMembers.length > 0) {
+        setMembers(
+          dbMembers.map((m) => ({
+            name: m === activeUser ? `${m} (You)` : m,
+            role: m === activeUser ? 'Creator' : 'Member',
+            online: true,
+          })),
+        )
+      }
+    }
+  }, [name, isGroup])
+
+  function handleSetTimer(val: string) {
+    setTimer(val)
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser && name) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.setChatTimer(name, val === 'Off' ? null : val)
+    }
+    showToast(`Disappearing messages set to ${val}`)
+  }
+
   function handleAddMember() {
     const trimmed = newMemberName.trim()
     if (!trimmed) return
@@ -140,15 +180,28 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
       showToast('User is already a member of this chat')
       return
     }
+
     setMembers((prev) => [...prev, { name: trimmed, role: 'Member', online: true }])
     setNewMemberName('')
     setAddMemberOpen(false)
+
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser && isGroup) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.addGroupMember(name, trimmed)
+    }
     showToast(`Added ${trimmed} to group`)
   }
 
   function handleKickMember(memberName: string) {
     if (memberName.includes('(You)')) return
     setMembers((prev) => prev.filter((m) => m.name !== memberName))
+
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser && isGroup) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.removeGroupMember(name, memberName)
+    }
     showToast(`Removed ${memberName} from group`)
   }
 
@@ -471,14 +524,7 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
                         key={opt.value}
                         type="button"
                         className={`timer-option-btn ${timer === opt.value ? 'selected' : ''}`}
-                        onClick={() => {
-                          setTimer(opt.value)
-                          showToast(
-                            opt.value === 'Off'
-                              ? 'Disappearing messages turned off'
-                              : `Timer set to ${opt.label}`,
-                          )
-                        }}
+                        onClick={() => handleSetTimer(opt.value)}
                       >
                         <TimerIcon size={14} />
                         <span>{opt.label}</span>
@@ -548,6 +594,29 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
 
             {openSections.has('data') && (
               <div className="dropdown-card-body">
+                {/* Shared Media & Files Grid */}
+                <div className="dropdown-sub-section">
+                  <span className="sub-title">Shared Media &amp; Files ({sharedTransfers.length})</span>
+                  <p className="card-desc">Files and media exchanged in this channel.</p>
+                  {sharedTransfers.length === 0 ? (
+                    <p className="muted-hint">No shared files yet</p>
+                  ) : (
+                    <div className="shared-files-list">
+                      {sharedTransfers.map((t: any) => (
+                        <div key={t.transfer_id} className="shared-file-item">
+                          <DownloadIcon size={14} className="accent-icon" />
+                          <div className="shared-file-info">
+                            <span className="shared-file-name">{t.filename}</span>
+                            <span className="shared-file-meta">
+                              {Math.round(t.file_size / 1024)} KB &middot; {t.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Export Transcript */}
                 <div className="dropdown-sub-section">
                   <span className="sub-title">Export Chat Transcript</span>

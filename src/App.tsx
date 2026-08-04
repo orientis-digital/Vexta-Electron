@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import LoginScreen from './screens/LoginScreen'
 import SignupScreen from './screens/SignupScreen'
 import LoadingScreen from './screens/LoadingScreen'
@@ -8,8 +9,22 @@ import ChatView from './screens/ChatView'
 import FriendsView from './screens/FriendsView'
 import SettingsView from './screens/SettingsView'
 import ProtectedRoute from './components/ProtectedRoute'
+import { AuthSession } from './crypto/session'
 
 function App() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const native = (window as any).vextaNative
+    if (native?.onLockVault) {
+      const unsubscribe = native.onLockVault(() => {
+        AuthSession.logout()
+        navigate('/login', { replace: true })
+      })
+      return unsubscribe
+    }
+  }, [navigate])
+
   return (
     <Routes>
       <Route path="/login" element={<LoginScreen />} />

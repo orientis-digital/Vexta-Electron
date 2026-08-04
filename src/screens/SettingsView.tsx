@@ -18,6 +18,10 @@ import {
 } from '../components/icons'
 
 import { bridgeClient } from '../network/bridge'
+import { exportVault, importVault, hashPasscode } from '../crypto/vault_backup'
+import { VextaDatabaseManager } from '../crypto/db_manager'
+import type { DbDevice } from '../crypto/db_manager'
+import { AuthSession } from '../crypto/session'
 
 type Tab = 'account' | 'security' | 'devices' | 'bridge' | 'storage' | 'about'
 
@@ -69,45 +73,108 @@ function SettingsView() {
   }
 
   // ── Security Settings State ──────────────────────────
-  const [autoLock, setAutoLock] = useState('5m')
-  const [biometrics, setBiometrics] = useState(true)
-  const [screenProtection, setScreenProtection] = useState(true)
-  const [hideNotifications, setHideNotifications] = useState(false)
+  const [autoLock, setAutoLock] = useState(() => localStorage.getItem('vx_setting_autolock') || '5m')
+  const [biometrics, setBiometrics] = useState(() => {
+    const val = localStorage.getItem('vx_setting_biometrics')
+    return val !== null ? val === 'true' : true
+  })
+  const [screenProtection, setScreenProtection] = useState(() => {
+    const val = localStorage.getItem('vx_setting_screen_protection')
+    return val !== null ? val === 'true' : true
+  })
+  const [hideNotifications, setHideNotifications] = useState(() => {
+    const val = localStorage.getItem('vx_setting_hide_notifications')
+    return val !== null ? val === 'true' : false
+  })
+
+  // OS Integration Settings
+  const [minimizeToTray, setMinimizeToTray] = useState(() => {
+    const val = localStorage.getItem('vx_setting_minimize_to_tray')
+    return val !== null ? val === 'true' : true
+  })
+  const [autoLaunch, setAutoLaunch] = useState(() => {
+    const val = localStorage.getItem('vx_setting_auto_launch')
+    return val !== null ? val === 'true' : false
+  })
+  const [globalHotkeys, setGlobalHotkeys] = useState(() => {
+    const val = localStorage.getItem('vx_setting_global_hotkeys')
+    return val !== null ? val === 'true' : true
+  })
+
+  // ── Duress State ─────────────────────────────────────
+  const [duressPasscode, setDuressPasscode] = useState('')
+  const [confirmDuress, setConfirmDuress] = useState('')
+  const [duressConfigured, setDuressConfigured] = useState(() => {
+    return Boolean(localStorage.getItem('vexta_duress_passcode_hash'))
+  })
+
+  async function handleSaveDuressPasscode(e: React.FormEvent) {
+    e.preventDefault()
+    if (!duressPasscode || duressPasscode !== confirmDuress) {
+      showToast('Duress passcodes do not match')
+      return
+    }
+    const hash = await hashPasscode(duressPasscode)
+    localStorage.setItem('vexta_duress_passcode_hash', hash)
+    setDuressConfigured(true)
+    setDuressPasscode('')
+    setConfirmDuress('')
+    showToast('Emergency wipe passcode configured successfully')
+  }
+
+  function handleClearDuressPasscode() {
+    localStorage.removeItem('vexta_duress_passcode_hash')
+    setDuressConfigured(false)
+    showToast('Emergency wipe passcode disabled')
+  }
 
   // ── Devices State ────────────────────────────────────
-  const [devices, setDevices] = useState<DeviceItem[]>([
-    {
-      id: 'dev-1',
-      name: 'Desktop Workstation',
-      type: 'desktop',
-      hardwareHash: 'sha256(7f8a91b2c4e57091)',
-      lastSeen: 'Active Now',
-      isCurrent: true,
-    },
-  ])
+  const [devices, setDevices] = useState<DeviceItem[]>([])
   const [pairQrOpen, setPairQrOpen] = useState(false)
 
+  // Sync settings with Electron
   useEffect(() => {
-    if (typeof window !== 'undefined' && (window as any).vextaNative) {
+    const native = (window as any).vextaNative
+    if (native) {
+      native.setMinimizeToTray(minimizeToTray).catch(() => {})
+      native.setAutoLaunch(autoLaunch).catch(() => {})
+      native.setGlobalHotkeys(globalHotkeys).catch(() => {})
+      native.setNotificationPrivacy(hideNotifications).catch(() => {})
+      native.setScreenProtection(screenProtection).catch(() => {})
+    }
+  }, [minimizeToTray, autoLaunch, globalHotkeys, hideNotifications, screenProtection])
+
+  useEffect(() => {
+    const user = AuthSession.getActiveUser() || 'guest'
+    const db = new VextaDatabaseManager(user)
+    const stored = db.getDevices()
+
+    if (stored.length > 0) {
+      setDevices(stored)
+    } else if (typeof window !== 'undefined' && (window as any).vextaNative) {
       ;(window as any).vextaNative.getSystemInfo().then((info: any) => {
         if (info) {
-          setDevices([
-            {
-              id: 'dev-1',
-              name: `${info.osName} (${info.arch})`,
-              type: 'desktop',
-              hardwareHash: 'sha256(7f8a91b2c4e57091)',
-              lastSeen: 'Active Now',
-              isCurrent: true,
-            },
-          ])
+          const currentDev: DbDevice = {
+            id: 'dev-' + Date.now().toString(16),
+            name: `${info.osName} (${info.arch})`,
+            type: 'desktop',
+            hardwareHash: 'sha256(' + Math.random().toString(36).slice(2, 10) + ')',
+            lastSeen: 'Active Now',
+            isCurrent: true,
+          }
+          db.saveDevice(currentDev)
+          setDevices([currentDev])
         }
       }).catch(() => {})
     }
   }, [])
 
   function revokeDevice(id: string, devName: string) {
+    const user = AuthSession.getActiveUser() || 'guest'
+    const db = new VextaDatabaseManager(user)
+    db.removeDevice(id)
     setDevices((prev) => prev.filter((d) => d.id !== id))
+    bridgeClient.sendMetadataSync('REVOKE_DEVICE', { device_id: id })
     showToast(`Revoked access for ${devName}`)
   }
 
@@ -129,22 +196,52 @@ function SettingsView() {
   // ── Storage State ────────────────────────────────────
   const [exportVaultOpen, setExportVaultOpen] = useState(false)
   const [vaultPassword, setVaultPassword] = useState('')
+  const [importVaultOpen, setImportVaultOpen] = useState(false)
+  const [importPassword, setImportPassword] = useState('')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
-  function handleExportVault() {
+  async function handleExportVault() {
     if (!vaultPassword) return
-    const blob = new Blob(
-      [JSON.stringify({ vault: 'encrypted_payload_hex', exportedAt: new Date().toISOString() })],
-      { type: 'application/vxvault' },
-    )
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `backup_${Date.now()}.vxvault`
-    a.click()
-    URL.revokeObjectURL(url)
-    setVaultPassword('')
-    setExportVaultOpen(false)
-    showToast('Encrypted .vxvault backup downloaded')
+    try {
+      const user = AuthSession.getActiveUser() || 'guest'
+      const blob = await exportVault(vaultPassword, user)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `vexta_backup_${user}_${Date.now()}.vxvault`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setVaultPassword('')
+      setExportVaultOpen(false)
+      showToast('Encrypted .vxvault backup downloaded')
+    } catch (err) {
+      showToast('Export failed: ' + String(err))
+    }
+  }
+
+  async function handleImportVault() {
+    if (!importFile || !importPassword) return
+    setImporting(true)
+    setImportError(null)
+    try {
+      const buffer = await importFile.arrayBuffer()
+      const res = await importVault(buffer, importPassword)
+      if (!res.success) {
+        setImportError(res.error || 'Vault import failed')
+        setImporting(false)
+        return
+      }
+      setImportVaultOpen(false)
+      showToast(`Vault database restored (${res.restoredCount} items). Reloading...`)
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (err) {
+      setImportError(String(err))
+      setImporting(false)
+    }
   }
 
   // ── About State ──────────────────────────────────────
@@ -374,8 +471,10 @@ function SettingsView() {
                     className="toggle-switch"
                     checked={biometrics}
                     onChange={(e) => {
-                      setBiometrics(e.target.checked)
-                      showToast(e.target.checked ? 'Biometrics enabled' : 'Biometrics disabled')
+                      const val = e.target.checked
+                      setBiometrics(val)
+                      localStorage.setItem('vx_setting_biometrics', String(val))
+                      showToast(val ? 'Biometrics enabled' : 'Biometrics disabled')
                     }}
                   />
                 </div>
@@ -390,9 +489,11 @@ function SettingsView() {
                     className="toggle-switch"
                     checked={screenProtection}
                     onChange={(e) => {
-                      setScreenProtection(e.target.checked)
+                      const val = e.target.checked
+                      setScreenProtection(val)
+                      localStorage.setItem('vx_setting_screen_protection', String(val))
                       showToast(
-                        e.target.checked ? 'Screen protection enabled' : 'Screen protection disabled',
+                        val ? 'Screen protection enabled' : 'Screen protection disabled',
                       )
                     }}
                   />
@@ -408,12 +509,126 @@ function SettingsView() {
                     className="toggle-switch"
                     checked={hideNotifications}
                     onChange={(e) => {
-                      setHideNotifications(e.target.checked)
+                      const val = e.target.checked
+                      setHideNotifications(val)
+                      localStorage.setItem('vx_setting_hide_notifications', String(val))
                       showToast('Notification privacy updated')
                     }}
                   />
                 </div>
+
+                <div className="toggle-item">
+                  <div className="toggle-info">
+                    <span className="toggle-title">Minimize to System Tray</span>
+                    <span className="toggle-desc">Closing the window will minimize it to system tray instead of exiting.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="toggle-switch"
+                    checked={minimizeToTray}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setMinimizeToTray(val)
+                      localStorage.setItem('vx_setting_minimize_to_tray', String(val))
+                      showToast(val ? 'Minimize to tray enabled' : 'Minimize to tray disabled')
+                    }}
+                  />
+                </div>
+
+                <div className="toggle-item">
+                  <div className="toggle-info">
+                    <span className="toggle-title">Launch at Startup</span>
+                    <span className="toggle-desc">Automatically launch Vexta when you boot your system.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="toggle-switch"
+                    checked={autoLaunch}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setAutoLaunch(val)
+                      localStorage.setItem('vx_setting_auto_launch', String(val))
+                      showToast(val ? 'Auto-launch enabled' : 'Auto-launch disabled')
+                    }}
+                  />
+                </div>
+
+                <div className="toggle-item">
+                  <div className="toggle-info">
+                    <span className="toggle-title">Global Shortcut Hotkeys</span>
+                    <span className="toggle-desc">Enable Cmd/Ctrl+Shift+L to lock vault, and Cmd/Ctrl+Shift+V to toggle focus.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="toggle-switch"
+                    checked={globalHotkeys}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setGlobalHotkeys(val)
+                      localStorage.setItem('vx_setting_global_hotkeys', String(val))
+                      showToast(val ? 'Global hotkeys enabled' : 'Global hotkeys disabled')
+                    }}
+                  />
+                </div>
               </div>
+            </div>
+
+            {/* Duress Emergency Wipe Passcode */}
+            <div className="info-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <TrashIcon size={16} className="accent-icon" />
+                  <h3>Duress / Emergency Wipe Passcode</h3>
+                </div>
+              </div>
+              <p className="card-desc">
+                Configure a decoy passcode. Entering this passcode on the login screen will instantly wipe all local encrypted databases and keying material.
+              </p>
+
+              {duressConfigured ? (
+                <div className="setting-toggle-row" style={{ alignItems: 'center' }}>
+                  <span className="mono-label" style={{ color: '#39ff14' }}>
+                    ✓ Emergency wipe passcode active
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={handleClearDuressPasscode}
+                  >
+                    Remove Duress Passcode
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSaveDuressPasscode} className="duress-form">
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label className="field-label">Set Emergency Wipe Passcode</label>
+                    <input
+                      type="password"
+                      className="modal-input"
+                      placeholder="Enter emergency passcode..."
+                      value={duressPasscode}
+                      onChange={(e) => setDuressPasscode(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label className="field-label">Confirm Emergency Wipe Passcode</label>
+                    <input
+                      type="password"
+                      className="modal-input"
+                      placeholder="Confirm emergency passcode..."
+                      value={confirmDuress}
+                      onChange={(e) => setConfirmDuress(e.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="btn-secondary"
+                    disabled={!duressPasscode || duressPasscode !== confirmDuress}
+                  >
+                    Enable Duress Wipe
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         )}
@@ -623,11 +838,11 @@ function SettingsView() {
               <div className="card-header">
                 <div className="card-title">
                   <DownloadIcon size={16} className="accent-icon" />
-                  <h3>Export Encrypted Vault Backup (.vxvault)</h3>
+                  <h3>Encrypted Vault Backup (.vxvault)</h3>
                 </div>
               </div>
               <p className="card-desc">
-                Create a password-protected `.vxvault` archive containing your keys and local database.
+                Export or restore a password-protected `.vxvault` archive containing your keys and local database.
               </p>
 
               <div className="card-actions">
@@ -638,6 +853,14 @@ function SettingsView() {
                 >
                   <DownloadIcon size={14} />
                   Export .vxvault Backup
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setImportVaultOpen(true)}
+                >
+                  <DatabaseIcon size={14} />
+                  Import .vxvault Backup
                 </button>
               </div>
             </div>
@@ -789,6 +1012,62 @@ function SettingsView() {
                 onClick={handleExportVault}
               >
                 Download Backup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Vault Modal */}
+      {importVaultOpen && (
+        <div className="modal-backdrop" onClick={() => setImportVaultOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon">
+              <DatabaseIcon size={20} />
+            </div>
+            <h2 className="modal-title">Import Vault (.vxvault)</h2>
+            <p className="modal-note">
+              Select a `.vxvault` file and enter its password to restore your encrypted database.
+            </p>
+
+            <div className="modal-field">
+              <label className="field-label">Select .vxvault File</label>
+              <input
+                type="file"
+                accept=".vxvault"
+                className="modal-input"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+            </div>
+
+            <div className="modal-field">
+              <label className="field-label">Backup Decryption Password</label>
+              <input
+                type="password"
+                className="modal-input"
+                placeholder="Enter password..."
+                value={importPassword}
+                onChange={(e) => setImportPassword(e.target.value)}
+              />
+            </div>
+
+            {importError && (
+              <p className="step-error-msg" style={{ marginTop: '8px', color: '#ff4d4f' }}>
+                {importError}
+              </p>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn-ghost" onClick={() => setImportVaultOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!importFile || !importPassword || importing}
+                onClick={handleImportVault}
+              >
+                {importing ? 'Decrypting...' : 'Restore Vault'}
               </button>
             </div>
           </div>
