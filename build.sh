@@ -26,19 +26,23 @@ cd "$SCRIPT_DIR"
 BUMP_TYPE=""
 EXPLICIT_VERSION=""
 CREATE_GIT_TAG=false
+NON_INTERACTIVE=false
 
 usage() {
     echo -e "${BOLD}Usage:${NC} $0 [OPTIONS]"
     echo -e "\n${BOLD}Options:${NC}"
+    echo "  --keep-version       Keep existing version without prompt"
     echo "  --bump patch         Bump patch version (e.g. 1.0.0 -> 1.0.1)"
     echo "  --bump minor         Bump minor version (e.g. 1.0.0 -> 1.1.0)"
     echo "  --bump major         Bump major version (e.g. 1.0.0 -> 2.0.0)"
     echo "  --set-version <ver>  Set exact version (e.g. 1.2.3)"
     echo "  --tag                Create git tag v<version> on successful build"
+    echo "  -y, --yes            Run non-interactively keeping default options"
     echo "  --help, -h           Show this help menu"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  ./build.sh --bump patch"
+    echo "  ./build.sh                     # Interactive version prompt"
+    echo "  ./build.sh --bump patch        # Non-interactive patch bump"
     echo "  ./build.sh --set-version 1.5.0 --tag"
     exit 0
 }
@@ -46,6 +50,10 @@ usage() {
 # Parse CLI arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --keep-version|-y|--yes)
+            NON_INTERACTIVE=true
+            shift
+            ;;
         --bump)
             BUMP_TYPE="$2"
             shift 2
@@ -84,6 +92,35 @@ log_step "1. Version Management & Project Metadata"
 
 CURRENT_VERSION=$(node -p "require('./package.json').version")
 log_info "Current application version: ${BOLD}v${CURRENT_VERSION}${NC}"
+
+# Interactive prompt if no CLI flags specified and TTY attached
+if [ -z "$EXPLICIT_VERSION" ] && [ -z "$BUMP_TYPE" ] && [ "$NON_INTERACTIVE" = false ]; then
+    if [ -t 0 ]; then
+        PATCH_PREVIEW=$(node -p "const [m,n,p]='${CURRENT_VERSION}'.split('.').map(Number); \`\${m}.\${n}.\${p+1}\`")
+        MINOR_PREVIEW=$(node -p "const [m,n,p]='${CURRENT_VERSION}'.split('.').map(Number); \`\${m}.\${n+1}.0\`")
+        MAJOR_PREVIEW=$(node -p "const [m,n,p]='${CURRENT_VERSION}'.split('.').map(Number); \`\${m+1}.0.0\`")
+
+        echo -e "\n${BOLD}Select Version Action for current version (v${CURRENT_VERSION}):${NC}"
+        echo "  1) Keep current version (v${CURRENT_VERSION})"
+        echo "  2) Bump Patch (v${CURRENT_VERSION} -> v${PATCH_PREVIEW})"
+        echo "  3) Bump Minor (v${CURRENT_VERSION} -> v${MINOR_PREVIEW})"
+        echo "  4) Bump Major (v${CURRENT_VERSION} -> v${MAJOR_PREVIEW})"
+        echo "  5) Enter custom version string"
+        echo ""
+        read -r -p "Choice [1-5] (default: 1): " CHOICE
+        case "$CHOICE" in
+            2) BUMP_TYPE="patch" ;;
+            3) BUMP_TYPE="minor" ;;
+            4) BUMP_TYPE="major" ;;
+            5)
+                read -r -p "Enter custom version (e.g. 1.2.3): " EXPLICIT_VERSION
+                ;;
+            *)
+                log_info "Action selected: Keeping current version v${CURRENT_VERSION}"
+                ;;
+        esac
+    fi
+fi
 
 if [ -n "$EXPLICIT_VERSION" ]; then
     log_info "Setting explicit version to v${EXPLICIT_VERSION}..."
