@@ -66,7 +66,7 @@ export class SubstrataBridgeClient {
 
   constructor(defaultUrl?: string) {
     const savedUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('vexta_bridge_url') : null
-    this.url = defaultUrl || savedUrl || 'ws://127.0.0.1:8000/ws/chat/'
+    this.url = defaultUrl || savedUrl || 'wss://vexta-api.nexusec.space/ws/chat/'
   }
 
   setSessionPasscode(passcode: string | null) {
