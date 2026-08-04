@@ -1,54 +1,434 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { VextaDatabaseManager } from '../crypto/db_manager'
+import { bridgeClient } from '../network/bridge'
+import {
+  CheckIcon,
+  CloseIcon,
+  CopyIcon,
+  KeyIcon,
+  PeopleIcon,
+  PlusIcon,
+  QrCodeIcon,
+  ShieldIcon,
+  UserPlusIcon,
+} from '../components/icons'
 
 type Tab = 'active' | 'pending' | 'add'
 
+type Friend = {
+  id: string
+  name: string
+  handle: string
+  fingerprint: string
+  status: string
+  online: boolean
+}
+
+type PendingRequest = {
+  id: string
+  name: string
+  handle: string
+  direction: 'incoming' | 'outgoing'
+  time: string
+}
+
+const AVATAR_PALETTE = [
+  '#39ff14',
+  '#00b4d8',
+  '#9b5de5',
+  '#f15bb5',
+  '#fee440',
+  '#ff6b6b',
+  '#06d6a0',
+]
+
+function avatarStyle(name: string) {
+  const hash = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+  return { background: AVATAR_PALETTE[hash % AVATAR_PALETTE.length] }
+}
+
 function FriendsView() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('active')
   const [username, setUsername] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
+  const [shareQrOpen, setShareQrOpen] = useState(false)
+
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
+
+  function showToast(msg: string) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  function acceptRequest(id: string, name: string) {
+    setPendingRequests((prev) => prev.filter((r) => r.id !== id))
+    setFriends((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        name,
+        handle: `@${name.toLowerCase()}`,
+        fingerprint: '3C4D : 5E6F : 7A8B : 91B2',
+        status: 'online',
+        online: true,
+      },
+    ])
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.addContact({
+        username: name,
+        public_key: 'ACTIVE_KEY',
+        display_name: name,
+        created_at: new Date().toISOString(),
+        status: 'active',
+      })
+      bridgeClient.acceptFriendRequest(id)
+    }
+    showToast(`Accepted friend request from ${name}`)
+  }
+
+  function declineRequest(id: string, name: string) {
+    setPendingRequests((prev) => prev.filter((r) => r.id !== id))
+    bridgeClient.rejectFriendRequest(id)
+    showToast(`Declined request from ${name}`)
+  }
+
+  function removeFriend(id: string, name: string) {
+    setFriends((prev) => prev.filter((f) => f.id !== id))
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.removeContact(name)
+      bridgeClient.removeFriend(name)
+    }
+    showToast(`Removed ${name} from contacts`)
+  }
+
+  function handleAddFriend(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmed = username.trim()
+    if (!trimmed) return
+
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.addContact({
+        username: trimmed,
+        public_key: 'PENDING_KEY',
+        display_name: trimmed,
+        created_at: new Date().toISOString(),
+        status: 'pending',
+      })
+      bridgeClient.sendFriendRequest(trimmed)
+    }
+
+    showToast(`Friend request sent to ${trimmed}`)
+    setPendingRequests((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        name: trimmed,
+        handle: `@${trimmed.toLowerCase()}`,
+        direction: 'outgoing',
+        time: 'Just now',
+      },
+    ])
+    setUsername('')
+  }
+
+  const myIdentityUri = 'vexta://identity/Guest?fingerprint=4A8F9B1C2E3D8F7A'
 
   return (
-    <div className="screen-pane">
-      <h1>Friends</h1>
-      <div className="tabs">
+    <div className="screen-pane friends-screen">
+      {/* Toast Notice */}
+      {toast && (
+        <div className="info-toast" role="status">
+          <ShieldIcon size={14} />
+          <span>{toast}</span>
+        </div>
+      )}
+
+      <div className="friends-header">
+        <h1>Friends &amp; Contacts</h1>
+        <p className="friends-subtitle">
+          Manage your trusted end-to-end encrypted contacts and pending identity keys
+        </p>
+      </div>
+
+      <div className="tabs friends-tabs">
         <button
           type="button"
-          className={tab === 'active' ? 'active' : ''}
+          className={`tab ${tab === 'active' ? 'active' : ''}`}
           onClick={() => setTab('active')}
         >
-          Active Friends
+          <PeopleIcon size={14} />
+          <span>Active Friends ({friends.length})</span>
         </button>
         <button
           type="button"
-          className={tab === 'pending' ? 'active' : ''}
+          className={`tab ${tab === 'pending' ? 'active' : ''}`}
           onClick={() => setTab('pending')}
         >
-          Pending Requests
+          <UserPlusIcon size={14} />
+          <span>Requests ({pendingRequests.length})</span>
         </button>
         <button
           type="button"
-          className={tab === 'add' ? 'active' : ''}
+          className={`tab ${tab === 'add' ? 'active' : ''}`}
           onClick={() => setTab('add')}
         >
-          Add Friend
+          <PlusIcon size={14} />
+          <span>Add Friend</span>
         </button>
       </div>
 
-      {tab === 'active' && <p className="muted">No friends yet.</p>}
-      {tab === 'pending' && <p className="muted">No pending requests.</p>}
+      {/* TAB 1: ACTIVE FRIENDS */}
+      {tab === 'active' && (
+        <div className="friends-grid">
+          {friends.map((f) => (
+            <div key={f.id} className="info-card friend-card">
+              <div className="friend-card-top">
+                <div className="friend-avatar" style={avatarStyle(f.name)}>
+                  {f.name.charAt(0).toUpperCase()}
+                  {f.online && <span className="presence-dot" />}
+                </div>
+                <div className="friend-meta">
+                  <span className="friend-name">{f.name}</span>
+                  <span className="friend-handle">{f.handle}</span>
+                </div>
+                <span className={`trust-tag ${f.online ? 'verified' : 'unverified'}`}>
+                  {f.online ? 'Online' : 'Offline'}
+                </span>
+              </div>
+
+              <div className="friend-fingerprint-box">
+                <KeyIcon size={12} className="accent-icon" />
+                <span className="friend-fp">{f.fingerprint}</span>
+              </div>
+
+              <div className="card-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => navigate(`/chat/${encodeURIComponent(f.name)}`)}
+                >
+                  Start Chat
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => navigate(`/chat/${encodeURIComponent(f.name)}/info`)}
+                >
+                  Security Info
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger-outline"
+                  onClick={() => removeFriend(f.id, f.name)}
+                  title="Remove Contact"
+                >
+                  <CloseIcon size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {friends.length === 0 && (
+            <div className="empty-friends-card">
+              <PeopleIcon size={32} className="muted-icon" />
+              <p>No active friends yet. Add a contact using their username or identity key.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: PENDING REQUESTS */}
+      {tab === 'pending' && (
+        <div className="pending-list">
+          {pendingRequests.map((r) => (
+            <div key={r.id} className="info-card pending-card">
+              <div className="pending-avatar" style={avatarStyle(r.name)}>
+                {r.name.charAt(0).toUpperCase()}
+              </div>
+
+              <div className="pending-info">
+                <div className="pending-name-row">
+                  <span className="pending-name">{r.name}</span>
+                  <span className="pending-direction">
+                    {r.direction === 'incoming' ? 'Incoming Request' : 'Outgoing Request'}
+                  </span>
+                </div>
+                <span className="pending-handle">{r.handle} \u00B7 {r.time}</span>
+              </div>
+
+              <div className="card-actions">
+                {r.direction === 'incoming' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => acceptRequest(r.id, r.name)}
+                    >
+                      <CheckIcon size={14} />
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger-outline"
+                      onClick={() => declineRequest(r.id, r.name)}
+                    >
+                      Decline
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => declineRequest(r.id, r.name)}
+                  >
+                    Cancel Request
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {pendingRequests.length === 0 && (
+            <div className="empty-friends-card">
+              <UserPlusIcon size={32} className="muted-icon" />
+              <p>No pending friend requests.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: ADD FRIEND & SHARE PROFILE */}
       {tab === 'add' && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            setUsername('')
-          }}
-        >
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Add by username or identity string"
-          />
-          <button type="submit">Add</button>
-        </form>
+        <div className="add-friend-layout">
+          {/* Add Form Card */}
+          <div className="info-card">
+            <div className="card-header">
+              <div className="card-title">
+                <UserPlusIcon size={16} className="accent-icon" />
+                <h3>Add Friend by Identity</h3>
+              </div>
+            </div>
+            <p className="card-desc">
+              Enter a Vexta username or paste an identity URI string (`vexta://identity/...`) to initiate an encrypted handshake request.
+            </p>
+
+            <form onSubmit={handleAddFriend} className="settings-form">
+              <div className="form-group">
+                <label className="field-label" htmlFor="add-username-input">
+                  Username / Identity URI String
+                </label>
+                <input
+                  id="add-username-input"
+                  className="modal-input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. NeonPriest or vexta://identity/..."
+                  autoFocus
+                />
+              </div>
+
+              <button type="submit" className="btn-primary" disabled={!username.trim()}>
+                <UserPlusIcon size={14} />
+                Send Friend Request
+              </button>
+            </form>
+          </div>
+
+          {/* Personal Share Profile Card */}
+          <div className="info-card share-profile-card">
+            <div className="card-header">
+              <div className="card-title">
+                <QrCodeIcon size={16} className="accent-icon" />
+                <h3>Your Share Profile</h3>
+              </div>
+            </div>
+            <p className="card-desc">
+              Share your public identity key URI or QR code with friends to connect instantly over the bridge relay.
+            </p>
+
+            <div className="share-identity-box">
+              <span className="share-uri">{myIdentityUri}</span>
+            </div>
+
+            <div className="card-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(myIdentityUri).catch(() => {})
+                  showToast('Identity URI copied to clipboard')
+                }}
+              >
+                <CopyIcon size={14} />
+                Copy Identity Link
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShareQrOpen(true)}
+              >
+                <QrCodeIcon size={14} />
+                Show Share QR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share QR Modal */}
+      {shareQrOpen && (
+        <div className="modal-backdrop" onClick={() => setShareQrOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon">
+              <QrCodeIcon size={20} />
+            </div>
+            <h2 className="modal-title">Your Profile QR Code</h2>
+            <p className="modal-note">
+              Scan from mobile or send this identity payload to add you on Vexta.
+            </p>
+
+            <div className="qr-container">
+              <svg className="qr-svg" viewBox="0 0 200 200" fill="currentColor">
+                <rect width="200" height="200" fill="#1e1e1e" rx="12" />
+                <rect x="20" y="20" width="50" height="50" fill="#39ff14" rx="4" />
+                <rect x="30" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
+                <rect x="40" y="40" width="10" height="10" fill="#39ff14" rx="1" />
+
+                <rect x="130" y="20" width="50" height="50" fill="#39ff14" rx="4" />
+                <rect x="140" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
+                <rect x="150" y="40" width="10" height="10" fill="#39ff14" rx="1" />
+
+                <rect x="20" y="130" width="50" height="50" fill="#39ff14" rx="4" />
+                <rect x="30" y="140" width="30" height="30" fill="#1e1e1e" rx="2" />
+                <rect x="40" y="150" width="10" height="10" fill="#39ff14" rx="1" />
+
+                {[
+                  [80, 20], [90, 20], [110, 20], [80, 40], [100, 40],
+                  [80, 70], [90, 80], [120, 80], [150, 80],
+                  [20, 90], [40, 100], [80, 100], [110, 100], [140, 100],
+                  [30, 110], [90, 120], [120, 110], [150, 120]
+                ].map(([x, y], idx) => (
+                  <rect key={idx} x={x} y={y} width="10" height="10" fill="#39ff14" rx="1" />
+                ))}
+              </svg>
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="btn-ghost" onClick={() => setShareQrOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
