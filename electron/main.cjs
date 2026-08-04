@@ -11,6 +11,9 @@ function getSystemInfo() {
   const osName = osTypeMap[os.type()] || os.type()
   const release = os.release()
   const arch = os.arch()
+  const isWindows = process.platform === 'win32'
+  const isMac = process.platform === 'darwin'
+  const isLinux = process.platform === 'linux'
 
   return {
     osName,
@@ -18,6 +21,13 @@ function getSystemInfo() {
     deviceName: `${osName} (${arch})`,
     platform: process.platform,
     arch,
+    isWindows,
+    isMac,
+    isLinux,
+    sep: path.sep,
+    userDataPath: app.getPath('userData'),
+    downloadsPath: app.getPath('downloads'),
+    appDataPath: app.getPath('appData'),
   }
 }
 
@@ -43,6 +53,15 @@ function createWindow() {
 
 ipcMain.handle('get-system-info', () => {
   return getSystemInfo()
+})
+
+ipcMain.handle('normalize-path', (_event, targetPath) => {
+  if (typeof targetPath !== 'string') return ''
+  return path.normalize(targetPath)
+})
+
+ipcMain.handle('join-paths', (_event, ...segments) => {
+  return path.join(...segments)
 })
 
 app.whenReady().then(createWindow)
