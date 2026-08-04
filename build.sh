@@ -244,14 +244,14 @@ mkdir -p release
 
 case "$TARGET_PLATFORM" in
     win)
-        log_info "Running electron-builder Windows target..."
-        npx electron-builder --win nsis portable || log_warn "Windows packaging finished with warnings. Note: On 64-bit Linux hosts without wine32:i386, install build.ps1 on Windows or wine32."
+        log_info "Running electron-builder Windows target (64-bit x64)..."
+        npx electron-builder --win --x64
         ;;
     all)
         log_info "Running electron-builder Linux targets..."
         npx electron-builder --linux
-        log_info "Running electron-builder Windows targets..."
-        npx electron-builder --win nsis portable || log_warn "Windows packaging finished with warnings."
+        log_info "Running electron-builder Windows targets (64-bit x64)..."
+        npx electron-builder --win --x64
         ;;
     *)
         log_info "Running electron-builder Linux targets (AppImage, deb, tar.gz)..."
