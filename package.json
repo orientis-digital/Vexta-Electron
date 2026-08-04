@@ -5,7 +5,7 @@
   "description": "Vexta Zero-Knowledge Encrypted Messenger",
   "author": "Vexta Team <orientisdigital.official@gmail.com>",
   "type": "module",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
