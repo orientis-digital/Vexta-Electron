@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   CopyIcon,
   DatabaseIcon,
@@ -76,7 +76,7 @@ function SettingsView() {
   const [devices, setDevices] = useState<DeviceItem[]>([
     {
       id: 'dev-1',
-      name: 'Linux Workstation (x86_64)',
+      name: 'Desktop Workstation',
       type: 'desktop',
       hardwareHash: 'sha256(7f8a91b2c4e57091)',
       lastSeen: 'Active Now',
@@ -84,6 +84,25 @@ function SettingsView() {
     },
   ])
   const [pairQrOpen, setPairQrOpen] = useState(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).vextaNative) {
+      ;(window as any).vextaNative.getSystemInfo().then((info: any) => {
+        if (info) {
+          setDevices([
+            {
+              id: 'dev-1',
+              name: `${info.osName} (${info.arch})`,
+              type: 'desktop',
+              hardwareHash: 'sha256(7f8a91b2c4e57091)',
+              lastSeen: 'Active Now',
+              isCurrent: true,
+            },
+          ])
+        }
+      }).catch(() => {})
+    }
+  }, [])
 
   function revokeDevice(id: string, devName: string) {
     setDevices((prev) => prev.filter((d) => d.id !== id))

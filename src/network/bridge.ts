@@ -214,6 +214,32 @@ export class SubstrataBridgeClient {
     const pubKeyB64 = await exportPublicKeyBase64(signKeyPair.publicKey)
     const signatureB64 = await signNonceRSA_PSS(signKeyPair.privateKey, challenge.nonce)
 
+    // Dynamic System & OS Info Detection (Electron IPC or Browser UserAgent Fallback)
+    let osName = 'Linux'
+    let osVersion = 'x86_64'
+    let deviceName = 'Desktop Workstation'
+
+    if (typeof window !== 'undefined' && (window as any).vextaNative) {
+      try {
+        const nativeInfo = await (window as any).vextaNative.getSystemInfo()
+        if (nativeInfo) {
+          osName = nativeInfo.osName || osName
+          osVersion = nativeInfo.osVersion || osVersion
+          deviceName = nativeInfo.deviceName || deviceName
+        }
+      } catch (e) {
+        console.warn('[Substrata WSS] Error querying native system info via IPC:', e)
+      }
+    } else if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent
+      if (ua.includes('Windows')) osName = 'Windows'
+      else if (ua.includes('Macintosh') || ua.includes('Mac OS')) osName = 'macOS'
+      else if (ua.includes('Android')) osName = 'Android'
+      else if (ua.includes('iPhone') || ua.includes('iPad')) osName = 'iOS'
+      else if (ua.includes('Linux')) osName = 'Linux'
+      deviceName = `${osName} Client`
+    }
+
     if (this.authMode === 'register') {
       const registerPayload = {
         type: 'REGISTER',
@@ -221,13 +247,13 @@ export class SubstrataBridgeClient {
         public_key: pubKeyB64,
         signature: signatureB64,
         hardware_hash: 'sha256_7f8a91b2c4e57091',
-        device_name: 'Linux Workstation',
-        os_name: 'Linux',
-        os_version: 'x86_64',
+        device_name: deviceName,
+        os_name: osName,
+        os_version: osVersion,
         device_type: 'Desktop',
         app_version: '2.4.0-electron',
       }
-      console.log(`[Substrata WSS] Transmitting REGISTER payload for @${activeUser} to bridge server`)
+      console.log(`[Substrata WSS] Transmitting REGISTER payload for @${activeUser} (${osName}) to bridge server`)
       this.sendJson(registerPayload)
       this.authMode = 'login'
       this.setStatus('connected')
@@ -243,9 +269,9 @@ export class SubstrataBridgeClient {
       public_key: pubKeyB64,
       signature: signatureB64,
       hardware_hash: 'sha256_7f8a91b2c4e57091',
-      device_name: 'Linux Workstation',
-      os_name: 'Linux',
-      os_version: 'x86_64',
+      device_name: deviceName,
+      os_name: osName,
+      os_version: osVersion,
       device_type: 'Desktop',
       app_version: '2.4.0-electron',
     }
