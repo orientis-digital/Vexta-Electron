@@ -107,10 +107,11 @@ export async function signNonceRSA_PSS(privateKey: CryptoKey, nonceStr: string):
   const encoder = new TextEncoder()
   const nonceBytes = encoder.encode(nonceStr)
 
+  // saltLength: 222 matches Python cryptography padding.PSS.MAX_LENGTH for 2048-bit RSA keys (256 - 32 - 2 = 222)
   const signatureBuffer = await crypto.subtle.sign(
     {
       name: 'RSA-PSS',
-      saltLength: 32,
+      saltLength: 222,
     },
     privateKey,
     nonceBytes,
