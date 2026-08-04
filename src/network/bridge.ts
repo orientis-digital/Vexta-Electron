@@ -64,8 +64,9 @@ export class SubstrataBridgeClient {
   private listeners: Set<(status: BridgeStatus) => void> = new Set()
   private messageListeners: Set<(msg: BlindMessagePayload) => void> = new Set()
 
-  constructor(url = 'wss://vexta-api.nexusec.space/ws/chat/') {
-    this.url = url
+  constructor(defaultUrl?: string) {
+    const savedUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('vexta_bridge_url') : null
+    this.url = defaultUrl || savedUrl || 'ws://127.0.0.1:8000/ws/chat/'
   }
 
   setSessionPasscode(passcode: string | null) {
@@ -76,9 +77,16 @@ export class SubstrataBridgeClient {
     this.authMode = mode
   }
 
+  getUrl(): string {
+    return this.url
+  }
+
   setUrl(newUrl: string) {
     if (this.url !== newUrl) {
       this.url = newUrl
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('vexta_bridge_url', newUrl)
+      }
       this.disconnect()
       this.connect()
     }

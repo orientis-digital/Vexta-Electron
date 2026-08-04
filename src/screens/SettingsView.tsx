@@ -17,6 +17,8 @@ import {
   TrashIcon,
 } from '../components/icons'
 
+import { bridgeClient } from '../network/bridge'
+
 type Tab = 'account' | 'security' | 'devices' | 'bridge' | 'storage' | 'about'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -110,7 +112,7 @@ function SettingsView() {
   }
 
   // ── Bridge Network State ─────────────────────────────
-  const [bridgeUrl, setBridgeUrl] = useState('wss://vexta-api.nexusec.space')
+  const [bridgeUrl, setBridgeUrl] = useState(() => bridgeClient.getUrl())
   const [testingPing, setTestingPing] = useState(false)
   const [pingLatency, setPingLatency] = useState<number | null>(24)
   const [customBridge, setCustomBridge] = useState(false)
