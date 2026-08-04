@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Desktop release packaging output
+release/
+release-builds/
+*.AppImage
+*.deb
+*.tar.gz
+*.exe
+*.dmg
+
