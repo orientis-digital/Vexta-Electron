@@ -32,3 +32,8 @@ release-builds/
 *.exe
 *.dmg
 
+# Deployment helper scripts
+deploy.sh
+publish.sh
+
+
