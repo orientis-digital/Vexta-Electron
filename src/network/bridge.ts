@@ -253,6 +253,7 @@ export class SubstrataBridgeClient {
         type: 'REGISTER',
         username: activeUser,
         public_key: pubKeyB64,
+        nonce: challenge.nonce,
         signature: signatureB64,
         hardware_hash: 'sha256_7f8a91b2c4e57091',
         device_name: deviceName,
@@ -264,7 +265,6 @@ export class SubstrataBridgeClient {
       console.log(`[Substrata WSS] Transmitting REGISTER payload for @${activeUser} (${osName}) to bridge server`)
       this.sendJson(registerPayload)
       this.authMode = 'login'
-      this.setStatus('connected')
       return
     }
 
@@ -275,6 +275,7 @@ export class SubstrataBridgeClient {
       type: 'AUTH_RESPONSE',
       username: activeUser,
       public_key: pubKeyB64,
+      nonce: challenge.nonce,
       signature: signatureB64,
       hardware_hash: 'sha256_7f8a91b2c4e57091',
       device_name: deviceName,
