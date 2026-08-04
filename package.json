@@ -1,13 +1,17 @@
 {
   "name": "vexta-electron",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Vexta Zero-Knowledge Encrypted Messenger",
+  "author": "Vexta Team <orientisdigital.official@gmail.com>",
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package": "npm run build && electron-builder"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -19,8 +23,42 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
+  },
+  "build": {
+    "appId": "space.nexusec.vexta",
+    "productName": "Vexta",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "public/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "category": "Network"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   }
 }
