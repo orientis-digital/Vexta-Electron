@@ -37,6 +37,7 @@ export type DbMessage = {
   is_read: number
   timer?: string
   reactions?: string[]
+  is_system?: number
 }
 
 export type DbGroup = {
@@ -82,6 +83,10 @@ export type DbDevice = {
   hardwareHash: string
   lastSeen: string
   isCurrent?: boolean
+  status?: 'active' | 'pending_approval' | 'revoked'
+  osName?: string
+  pinChallenge?: string
+  devicePubKey?: string
 }
 
 export class VextaDatabaseManager {
@@ -126,6 +131,10 @@ export class VextaDatabaseManager {
 
     if (!localStorage.getItem(`${this.storageKey}_chat_timers`)) {
       localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify({}))
+    }
+
+    if (!localStorage.getItem(`${this.storageKey}_devices`)) {
+      localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify([]))
     }
 
     if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
@@ -280,6 +289,38 @@ export class VextaDatabaseManager {
     localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify(timers))
   }
 
+  // ── Per-Chat Color Theme Presets API ────────────────────
+  getChatTheme(chatId: string): string {
+    const data = localStorage.getItem(`${this.storageKey}_chat_themes`)
+    const themes = data ? JSON.parse(data) : {}
+    return themes[chatId] || 'cyber_neon'
+  }
+
+  setChatTheme(chatId: string, themeId: string) {
+    const data = localStorage.getItem(`${this.storageKey}_chat_themes`)
+    const themes = data ? JSON.parse(data) : {}
+    themes[chatId] = themeId
+    localStorage.setItem(`${this.storageKey}_chat_themes`, JSON.stringify(themes))
+  }
+
+  // ── Pinned Messages API ──────────────────────────────
+  getPinnedMessage(chatId: string): string | null {
+    const data = localStorage.getItem(`${this.storageKey}_pinned_messages`)
+    const pinnedMap = data ? JSON.parse(data) : {}
+    return pinnedMap[chatId] || null
+  }
+
+  setPinnedMessage(chatId: string, text: string | null) {
+    const data = localStorage.getItem(`${this.storageKey}_pinned_messages`)
+    const pinnedMap = data ? JSON.parse(data) : {}
+    if (text) {
+      pinnedMap[chatId] = text
+    } else {
+      delete pinnedMap[chatId]
+    }
+    localStorage.setItem(`${this.storageKey}_pinned_messages`, JSON.stringify(pinnedMap))
+  }
+
   purgeExpiredMessages(): number {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     if (!data) return 0
@@ -369,15 +410,65 @@ export class VextaDatabaseManager {
     return data ? JSON.parse(data) : []
   }
 
+  getPendingDevices(): DbDevice[] {
+    return this.getDevices().filter((d) => d.status === 'pending_approval')
+  }
+
   saveDevice(device: DbDevice) {
     const all = this.getDevices().filter((d) => d.id !== device.id)
     all.push(device)
     localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
   }
 
+  updateDeviceStatus(deviceId: string, status: 'active' | 'pending_approval' | 'revoked') {
+    const devices = this.getDevices()
+    const target = devices.find((d) => d.id === deviceId)
+    if (target) {
+      target.status = status
+      target.lastSeen = new Date().toISOString()
+      localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(devices))
+    }
+  }
+
   removeDevice(deviceId: string) {
     const all = this.getDevices().filter((d) => d.id !== deviceId)
     localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
+  }
+
+  // ── Real-Time Presence & Privacy API ──────────────────
+  getGlobalPresencePrivacy(): 'everyone' | 'nobody' {
+    const val = localStorage.getItem(`${this.storageKey}_presence_global`)
+    return val === 'nobody' ? 'nobody' : 'everyone'
+  }
+
+  setGlobalPresencePrivacy(mode: 'everyone' | 'nobody') {
+    localStorage.setItem(`${this.storageKey}_presence_global`, mode)
+  }
+
+  getFriendPresenceOverride(username: string): boolean {
+    const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
+    const overrides = data ? JSON.parse(data) : {}
+    return overrides[username] !== false // Default true (allowed)
+  }
+
+  setFriendPresenceOverride(username: string, allow: boolean) {
+    const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
+    const overrides = data ? JSON.parse(data) : {}
+    overrides[username] = allow
+    localStorage.setItem(`${this.storageKey}_presence_overrides`, JSON.stringify(overrides))
+  }
+
+  updateContactLastActive(username: string, timestamp: string) {
+    const data = localStorage.getItem(`${this.storageKey}_last_active`)
+    const lastActiveMap = data ? JSON.parse(data) : {}
+    lastActiveMap[username] = timestamp
+    localStorage.setItem(`${this.storageKey}_last_active`, JSON.stringify(lastActiveMap))
+  }
+
+  getContactLastActive(username: string): string | null {
+    const data = localStorage.getItem(`${this.storageKey}_last_active`)
+    const lastActiveMap = data ? JSON.parse(data) : {}
+    return lastActiveMap[username] || null
   }
 }
 

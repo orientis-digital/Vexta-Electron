@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   clearRegisteredAccounts,
@@ -6,8 +6,10 @@ import {
   recoverAccount,
 } from '../crypto/auth'
 import { AuthSession } from '../crypto/session'
-
+import { bridgeClient } from '../network/bridge'
+import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
+import { ShieldCheck, ShieldAlert, Laptop, ArrowLeft, RefreshCw } from 'lucide-react'
 
 function SectionDivider({ label }: { label?: string }) {
   return (
@@ -34,6 +36,10 @@ function LoginScreen() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [customMode, setCustomMode] = useState(localAccountNames.length === 0)
 
+  // Device Authorization Pending State
+  const [pendingApprovalPin, setPendingApprovalPin] = useState<string | null>(null)
+  const [pendingUsername, setPendingUsername] = useState('')
+
   // Recovery state
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [recoveryUser, setRecoveryUser] = useState(selectedAccount || '')
@@ -42,6 +48,41 @@ function LoginScreen() {
   const [recoveryError, setRecoveryError] = useState('')
 
   const activeUsername = customMode ? customUsername : selectedAccount
+
+  useEffect(() => {
+    const unsubApproved = bridgeClient.subscribeDeviceApproved((payload) => {
+      if (payload.encryptedKeyBundle) {
+        try {
+          const decodedAccounts = atob(payload.encryptedKeyBundle)
+          localStorage.setItem('vexta_registered_accounts', decodedAccounts)
+        } catch (err) {
+          console.warn('[LoginScreen] Error restoring key bundle:', err)
+        }
+      }
+      if (payload.encryptedFriendRoster && pendingUsername) {
+        try {
+          const db = new VextaDatabaseManager(pendingUsername)
+          const contacts = JSON.parse(atob(payload.encryptedFriendRoster))
+          contacts.forEach((c: any) => db.addContact(c))
+        } catch (err) {
+          console.warn('[LoginScreen] Error restoring roster:', err)
+        }
+      }
+      setPendingApprovalPin(null)
+      setUnlocking(true)
+      setTimeout(() => navigate('/loading'), 800)
+    })
+
+    const unsubRejected = bridgeClient.subscribeDeviceRejected((payload) => {
+      setPendingApprovalPin(null)
+      setAuthError(`Login declined: ${payload.reason || 'Primary device rejected authorization'}`)
+    })
+
+    return () => {
+      unsubApproved()
+      unsubRejected()
+    }
+  }, [pendingUsername, navigate])
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -61,6 +102,21 @@ function LoginScreen() {
         }, 1500)
         return
       }
+    }
+
+    const isLocal = localAccountNames.some((u) => u.toLowerCase() === activeUsername.trim().toLowerCase())
+
+    if (!isLocal) {
+      // Initiate Out-of-Band Device Authorization Flow
+      const pin = Math.floor(100000 + Math.random() * 900000).toString()
+      setPendingApprovalPin(pin)
+      setPendingUsername(activeUsername.trim())
+
+      localStorage.setItem('vexta_active_user', activeUsername.trim())
+      bridgeClient.setAuthMode('login')
+      bridgeClient.setSessionPasscode(password)
+      bridgeClient.connect()
+      return
     }
 
     const result = await AuthSession.login(activeUsername, password)
@@ -134,7 +190,79 @@ function LoginScreen() {
         <div className="login-panel">
           <div className="mono-label">Vault Access</div>
 
-          <form className="login-form" onSubmit={handleUnlock} noValidate>
+          {pendingApprovalPin ? (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+                <div
+                  style={{
+                    padding: '12px',
+                    borderRadius: '50%',
+                    background: 'rgba(0, 229, 255, 0.15)',
+                    color: '#00e5ff',
+                    display: 'flex',
+                  }}
+                >
+                  <Laptop size={32} />
+                </div>
+              </div>
+
+              <h3 style={{ margin: '0 0 6px', fontSize: '18px', color: '#fff' }}>
+                Waiting for Device Approval
+              </h3>
+              <p style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)', margin: '0 0 16px' }}>
+                Open Vexta on your logged-in device for <strong style={{ color: '#00ffff' }}>@{pendingUsername}</strong> and verify this PIN:
+              </p>
+
+              <div
+                style={{
+                  background: 'rgba(0, 0, 0, 0.5)',
+                  border: '1px solid rgba(0, 229, 255, 0.3)',
+                  borderRadius: '8px',
+                  padding: '14px',
+                  fontSize: '28px',
+                  fontWeight: 700,
+                  letterSpacing: '8px',
+                  fontFamily: 'monospace',
+                  color: '#39ff14',
+                  margin: '0 auto 16px',
+                  maxWidth: '260px',
+                  boxShadow: '0 0 15px rgba(57, 255, 20, 0.2)',
+                }}
+              >
+                {pendingApprovalPin.slice(0, 3)}-{pendingApprovalPin.slice(3)}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '20px' }}>
+                <span className="status-dot connected" style={{ animation: 'pulse 1.5s infinite' }} />
+                Listening for primary device authorization...
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPendingApprovalPin(null)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                >
+                  <ArrowLeft size={16} />
+                  Cancel Login Request
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-text"
+                  style={{ fontSize: '12px', color: '#ffaa00' }}
+                  onClick={() => {
+                    setPendingApprovalPin(null)
+                    setRecoveryOpen(true)
+                  }}
+                >
+                  Device 1 Unavailable? Restore with Emergency Recovery Code
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form className="login-form" onSubmit={handleUnlock} noValidate>
             {!customMode && localAccountNames.length > 0 ? (
               <label>
                 <span className="field-label">Select Registered Account</span>
@@ -238,6 +366,7 @@ function LoginScreen() {
               )}
             </button>
           </form>
+          )}
 
           <button
             type="button"

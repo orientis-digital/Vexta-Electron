@@ -49,7 +49,7 @@ export async function computePasscodeHmac(nonceStr: string, passcode: string): P
     .join('')
 }
 
-export class SubstrataBridgeClient {
+export class VextaBridgeClient {
   private url: string
   private ws: WebSocket | null = null
   private status: BridgeStatus = 'disconnected'
@@ -65,6 +65,9 @@ export class SubstrataBridgeClient {
 
   private listeners: Set<(status: BridgeStatus) => void> = new Set()
   private messageListeners: Set<(msg: BlindMessagePayload) => void> = new Set()
+  private deviceRequestListeners: Set<(payload: { deviceId: string; deviceName: string; osName: string; pinChallenge: string; devicePubKey: string }) => void> = new Set()
+  private deviceApprovalListeners: Set<(payload: { encryptedKeyBundle: string; encryptedFriendRoster?: string }) => void> = new Set()
+  private deviceRejectionListeners: Set<(payload: { reason?: string }) => void> = new Set()
   private chunkStorePrefix = 'vexta_chunks_'
 
   constructor(defaultUrl?: string) {
@@ -110,6 +113,27 @@ export class SubstrataBridgeClient {
     }
   }
 
+  subscribeDeviceRequests(fn: (payload: { deviceId: string; deviceName: string; osName: string; pinChallenge: string; devicePubKey: string }) => void) {
+    this.deviceRequestListeners.add(fn)
+    return () => {
+      this.deviceRequestListeners.delete(fn)
+    }
+  }
+
+  subscribeDeviceApproved(fn: (payload: { encryptedKeyBundle: string; encryptedFriendRoster?: string }) => void) {
+    this.deviceApprovalListeners.add(fn)
+    return () => {
+      this.deviceApprovalListeners.delete(fn)
+    }
+  }
+
+  subscribeDeviceRejected(fn: (payload: { reason?: string }) => void) {
+    this.deviceRejectionListeners.add(fn)
+    return () => {
+      this.deviceRejectionListeners.delete(fn)
+    }
+  }
+
   connect() {
     this.isManualDisconnect = false
 
@@ -119,18 +143,18 @@ export class SubstrataBridgeClient {
 
     const activeUser = localStorage.getItem('vexta_active_user')
     if (!activeUser) {
-      console.log(`[Substrata WSS] Connection deferred: no active user logged in.`)
+      console.log(`[Vexta WSS] Connection deferred: no active user logged in.`)
       return
     }
 
-    console.log(`[Substrata WSS] Connecting to ${this.url} (mode: ${this.authMode})...`)
+    console.log(`[Vexta WSS] Connecting to ${this.url} (mode: ${this.authMode})...`)
     this.setStatus('connecting')
 
     try {
       this.ws = new WebSocket(this.url)
 
       this.ws.onopen = () => {
-        console.log(`[Substrata WSS] Channel OPEN to ${this.url}`)
+        console.log(`[Vexta WSS] Channel OPEN to ${this.url}`)
         this.reconnectAttempts = 0
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer)
@@ -141,15 +165,15 @@ export class SubstrataBridgeClient {
       this.ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data)
-          console.log(`[Substrata WSS] Frame:`, payload.type || payload)
+          console.log(`[Vexta WSS] Frame:`, payload.type || payload)
           this.handlePayload(payload)
         } catch {
-          console.warn(`[Substrata WSS] Raw frame:`, event.data)
+          console.warn(`[Vexta WSS] Raw frame:`, event.data)
         }
       }
 
       this.ws.onclose = (evt) => {
-        console.warn(`[Substrata WSS] Connection closed (code: ${evt.code})`)
+        console.warn(`[Vexta WSS] Connection closed (code: ${evt.code})`)
         this.ws = null
         this.setStatus('disconnected')
         if (!this.isManualDisconnect) {
@@ -158,11 +182,11 @@ export class SubstrataBridgeClient {
       }
 
       this.ws.onerror = (err) => {
-        console.error(`[Substrata WSS] Socket error:`, err)
+        console.error(`[Vexta WSS] Socket error:`, err)
         this.setStatus('disconnected')
       }
     } catch (err) {
-      console.error(`[Substrata WSS] Exception:`, err)
+      console.error(`[Vexta WSS] Exception:`, err)
       this.setStatus('disconnected')
       if (!this.isManualDisconnect) {
         this.scheduleReconnect()
@@ -174,16 +198,53 @@ export class SubstrataBridgeClient {
     if (payload.type === 'AUTH_CHALLENGE') {
       await this.handleAuthChallenge(payload as AuthChallengePayload)
     } else if (payload.type === 'AUTH_SUCCESS') {
-      console.log(`[Substrata WSS] AUTH_SUCCESS from relay!`)
+      console.log(`[Vexta WSS] AUTH_SUCCESS from relay!`)
       this.setStatus('connected')
     } else if (payload.type === 'AUTH_ERROR') {
-      console.error(`[Substrata WSS] AUTH_ERROR from relay:`, payload.message || payload.reason)
+      console.error(`[Vexta WSS] AUTH_ERROR from relay:`, payload.message || payload.reason)
       this.setStatus('auth_failed')
     } else if (payload.type === 'ERROR') {
-      console.error(`[Substrata WSS] ERROR from relay:`, payload.message)
+      console.error(`[Vexta WSS] ERROR from relay:`, payload.message)
       if (payload.message && (payload.message.includes('revoked') || payload.message.includes('session'))) {
         this.setStatus('auth_failed')
       }
+    } else if (payload.type === 'PUSH_DEVICE_REQUEST') {
+      console.log(`[Vexta WSS] Received PUSH_DEVICE_REQUEST from device: ${payload.device_name} (${payload.device_id})`)
+      const activeUser = localStorage.getItem('vexta_active_user')
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        db.saveDevice({
+          id: payload.device_id || `dev_${Date.now()}`,
+          name: payload.device_name || 'Secondary Device',
+          type: 'desktop',
+          hardwareHash: payload.hardware_hash || 'sha256_unknown',
+          lastSeen: new Date().toISOString(),
+          status: 'pending_approval',
+          osName: payload.os_name || 'Linux',
+          pinChallenge: payload.pin_challenge,
+          devicePubKey: payload.device_pubkey,
+        })
+      }
+      this.deviceRequestListeners.forEach((fn) =>
+        fn({
+          deviceId: payload.device_id || 'dev_pending',
+          deviceName: payload.device_name || 'Secondary Device',
+          osName: payload.os_name || 'Desktop Client',
+          pinChallenge: payload.pin_challenge || '000000',
+          devicePubKey: payload.device_pubkey || '',
+        }),
+      )
+    } else if (payload.type === 'DEVICE_APPROVED_EVENT') {
+      console.log(`[Vexta WSS] Received DEVICE_APPROVED_EVENT! Key bundle received.`)
+      this.deviceApprovalListeners.forEach((fn) =>
+        fn({
+          encryptedKeyBundle: payload.encrypted_key_bundle,
+          encryptedFriendRoster: payload.encrypted_friend_roster,
+        }),
+      )
+    } else if (payload.type === 'DEVICE_REJECTED_EVENT') {
+      console.warn(`[Vexta WSS] Received DEVICE_REJECTED_EVENT:`, payload.reason)
+      this.deviceRejectionListeners.forEach((fn) => fn({ reason: payload.reason }))
     } else if (payload.type === 'BLIND_MESSAGE') {
       // Send ACK frame if message has id
       if (payload.id) {
@@ -262,7 +323,7 @@ export class SubstrataBridgeClient {
                   // Auto-cache completed file to hidden OS location
                   this.cacheCompletedTransfer(db, transfer, storedChunks)
                     .then(() => localStorage.removeItem(chunkKey))
-                    .catch((err) => console.warn('[Substrata WSS] Cache failed:', err))
+                    .catch((err) => console.warn('[Vexta WSS] Cache failed:', err))
                 }
 
                 db.updateFileTransferProgress(
@@ -283,11 +344,20 @@ export class SubstrataBridgeClient {
               }
             } else if (innerPayload.type === 'file_status_response') {
               console.log(
-                `[Substrata WSS] Resume status for ${innerPayload.transfer_id}: ${innerPayload.received_chunks}/${innerPayload.status}`,
+                `[Vexta WSS] Resume status for ${innerPayload.transfer_id}: ${innerPayload.received_chunks}/${innerPayload.status}`,
               )
             } else if (innerPayload.type === 'message_reaction') {
               if (innerPayload.target_msg_id && innerPayload.emoji) {
                 db.toggleMessageReaction(Number(innerPayload.target_msg_id), innerPayload.emoji)
+              }
+            } else if (innerPayload.type === 'presence') {
+              const isGlobalAllowed = db.getGlobalPresencePrivacy() !== 'nobody'
+              const isFriendAllowed = db.getFriendPresenceOverride(payload.sender) !== false
+              if (isGlobalAllowed && isFriendAllowed) {
+                db.updateContactLastActive(
+                  payload.sender,
+                  innerPayload.timestamp || payload.timestamp || new Date().toISOString(),
+                )
               }
             } else if (innerPayload.type === 'metadata_sync') {
               if (innerPayload.action === 'ADD_CONTACT') {
@@ -299,6 +369,15 @@ export class SubstrataBridgeClient {
               } else if (innerPayload.action === 'DELETE_GROUP') {
                 db.deleteGroup(innerPayload.data.groupId)
               }
+            } else if (innerPayload.type === 'system_broadcast') {
+              db.saveMessage({
+                sender: 'Vexta - Global Message',
+                recipient: activeUser,
+                ciphertext: innerPayload.announcement || text,
+                timestamp: payload.timestamp || new Date().toISOString(),
+                is_read: 0,
+                is_system: 1,
+              })
             } else {
               db.saveMessage({
                 sender: payload.sender,
@@ -318,7 +397,7 @@ export class SubstrataBridgeClient {
             })
           }
         } catch (e) {
-          console.warn(`[Substrata WSS] Failed saving inbound message to DB:`, e)
+          console.warn(`[Vexta WSS] Failed saving inbound message to DB:`, e)
         }
       }
       this.messageListeners.forEach((fn) => fn(payload as BlindMessagePayload))
@@ -328,10 +407,10 @@ export class SubstrataBridgeClient {
   private async handleAuthChallenge(challenge: AuthChallengePayload) {
     const activeUser = localStorage.getItem('vexta_active_user')
     if (!activeUser) {
-      console.warn(`[Substrata WSS] No active user session found. Postponing AUTH_RESPONSE until user logs in.`)
+      console.warn(`[Vexta WSS] No active user session found. Postponing AUTH_RESPONSE until user logs in.`)
       return
     }
-    console.log(`[Substrata WSS] Processing AUTH_CHALLENGE for @${activeUser} (mode: ${this.authMode})...`)
+    console.log(`[Vexta WSS] Processing AUTH_CHALLENGE for @${activeUser} (mode: ${this.authMode})...`)
 
     const signKeyPair = await getOrCreateUserIdentityKeys(activeUser)
     const pubKeyB64 = await exportPublicKeyBase64(signKeyPair.publicKey)
@@ -351,7 +430,7 @@ export class SubstrataBridgeClient {
           deviceName = nativeInfo.deviceName || deviceName
         }
       } catch (e) {
-        console.warn('[Substrata WSS] Error querying native system info via IPC:', e)
+        console.warn('[Vexta WSS] Error querying native system info via IPC:', e)
       }
     } else if (typeof navigator !== 'undefined') {
       const ua = navigator.userAgent
@@ -377,7 +456,7 @@ export class SubstrataBridgeClient {
         device_type: 'Desktop',
         app_version: '2.4.0-electron',
       }
-      console.log(`[Substrata WSS] Transmitting REGISTER payload for @${activeUser} (${osName}) to bridge server`)
+      console.log(`[Vexta WSS] Transmitting REGISTER payload for @${activeUser} (${osName}) to bridge server`)
       this.sendJson(registerPayload)
       this.authMode = 'login'
       return
@@ -405,20 +484,20 @@ export class SubstrataBridgeClient {
       authResponse.passcode_hmac = passcodeHmac
     }
 
-    console.log(`[Substrata WSS] Transmitting AUTH_RESPONSE for @${activeUser}`)
+    console.log(`[Vexta WSS] Transmitting AUTH_RESPONSE for @${activeUser}`)
     this.sendJson(authResponse)
     this.setStatus('connected')
   }
 
   sendBlindMessage(recipient: string, wireBlob: string, selfCiphertext?: string) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[Substrata WSS] Cannot send message: socket not connected`)
+      console.warn(`[Vexta WSS] Cannot send message: socket not connected`)
       return false
     }
 
     const activeUser = localStorage.getItem('vexta_active_user')
     if (!activeUser) {
-      console.warn(`[Substrata WSS] Cannot send message: no active user logged in`)
+      console.warn(`[Vexta WSS] Cannot send message: no active user logged in`)
       return false
     }
 
@@ -435,7 +514,7 @@ export class SubstrataBridgeClient {
       msg.self_ciphertext = selfCiphertext
     }
 
-    console.log(`[Substrata WSS] Transmitting SEND_MESSAGE to @${recipient}`)
+    console.log(`[Vexta WSS] Transmitting SEND_MESSAGE to @${recipient}`)
     this.sendJson(msg)
     return true
   }
@@ -581,6 +660,22 @@ export class SubstrataBridgeClient {
     this.sendBlindMessage(recipient, btoa(payload))
   }
 
+  sendPresence(status: 'online' | 'offline' = 'online') {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (!activeUser) return
+    const payload = JSON.stringify({
+      type: 'presence',
+      status,
+      timestamp: new Date().toISOString(),
+    })
+    const contacts = new VextaDatabaseManager(activeUser).getContacts()
+    contacts.forEach((c) => {
+      if (c.username !== activeUser && c.username !== 'Vexta - Global Message') {
+        this.sendBlindMessage(c.username, btoa(payload))
+      }
+    })
+  }
+
   private async cacheCompletedTransfer(
     db: VextaDatabaseManager,
     transfer: DbFileTransfer,
@@ -617,9 +712,9 @@ export class SubstrataBridgeClient {
         cachedPath,
         cachedFilename,
       )
-      console.log(`[Substrata WSS] Cached file ${transfer.filename} → ${cachedFilename}`)
+      console.log(`[Vexta WSS] Cached file ${transfer.filename} → ${cachedFilename}`)
     } catch (err) {
-      console.error('[Substrata WSS] Failed to cache completed transfer:', err)
+      console.error('[Vexta WSS] Failed to cache completed transfer:', err)
     }
   }
 
@@ -664,6 +759,25 @@ export class SubstrataBridgeClient {
     this.sendJson({ type: 'LIST_DEVICES' })
   }
 
+  sendDeviceApproval(targetDeviceId: string, encryptedKeyBundle: string, encryptedFriendRoster?: string) {
+    console.log(`[Vexta WSS] Transmitting APPROVE_DEVICE for device: ${targetDeviceId}`)
+    this.sendJson({
+      type: 'APPROVE_DEVICE',
+      target_device_id: targetDeviceId,
+      encrypted_key_bundle: encryptedKeyBundle,
+      encrypted_friend_roster: encryptedFriendRoster,
+    })
+  }
+
+  sendDeviceRejection(targetDeviceId: string, reason?: string) {
+    console.log(`[Vexta WSS] Transmitting REJECT_DEVICE for device: ${targetDeviceId}`)
+    this.sendJson({
+      type: 'REJECT_DEVICE',
+      target_device_id: targetDeviceId,
+      reason: reason || 'Declined by primary device',
+    })
+  }
+
   revokeDevice(hardwareHash: string) {
     this.sendJson({ type: 'REVOKE_DEVICE', hardware_hash: hardwareHash })
   }
@@ -685,7 +799,7 @@ export class SubstrataBridgeClient {
 
   private scheduleReconnect() {
     if (this.isManualDisconnect || !localStorage.getItem('vexta_active_user')) {
-      console.log(`[Substrata WSS] Skipping reconnect schedule (manual disconnect or logged out)`)
+      console.log(`[Vexta WSS] Skipping reconnect schedule (manual disconnect or logged out)`)
       return
     }
 
@@ -700,7 +814,7 @@ export class SubstrataBridgeClient {
     this.reconnectAttempts++
 
     console.log(
-      `[Substrata WSS] Scheduling exponential reconnect attempt #${this.reconnectAttempts} in ${delay}ms...`,
+      `[Vexta WSS] Scheduling exponential reconnect attempt #${this.reconnectAttempts} in ${delay}ms...`,
     )
 
     this.reconnectTimer = setTimeout(() => {
@@ -730,4 +844,5 @@ export class SubstrataBridgeClient {
   }
 }
 
-export const bridgeClient = new SubstrataBridgeClient('wss://vexta-api.nexusec.space/ws/chat/')
+export const bridgeClient = new VextaBridgeClient('wss://vexta-api.nexusec.space/ws/chat/')
+export const SubstrataBridgeClient = VextaBridgeClient

@@ -25,7 +25,7 @@ function HomeView() {
               VEX<span>TA</span> PROTOCOL
             </h1>
             <p className="home-subtitle">
-              End-to-end encrypted messaging over the Substrata bridge relay. All keys remain encrypted on your device.
+              End-to-end encrypted messaging over the Vexta Network relay. All keys remain encrypted on your device.
             </p>
           </div>
         </div>

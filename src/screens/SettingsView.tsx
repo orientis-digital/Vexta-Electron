@@ -86,6 +86,15 @@ function SettingsView() {
     const val = localStorage.getItem('vx_setting_hide_notifications')
     return val !== null ? val === 'true' : false
   })
+  const [globalPresencePrivacy, setGlobalPresencePrivacy] = useState<'everyone' | 'nobody'>('everyone')
+
+  useEffect(() => {
+    const activeUser = AuthSession.getActiveUser()
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      setGlobalPresencePrivacy(db.getGlobalPresencePrivacy())
+    }
+  }, [])
 
   // OS Integration Settings
   const [minimizeToTray, setMinimizeToTray] = useState(() => {
@@ -169,12 +178,10 @@ function SettingsView() {
     }
   }, [])
 
-  function revokeDevice(id: string, devName: string) {
+  function revokeDevice(id: string, devName: string, hardwareHash?: string) {
     const user = AuthSession.getActiveUser() || 'guest'
-    const db = new VextaDatabaseManager(user)
-    db.removeDevice(id)
+    AuthSession.revokeDevice(id, hardwareHash)
     setDevices((prev) => prev.filter((d) => d.id !== id))
-    bridgeClient.sendMetadataSync('REVOKE_DEVICE', { device_id: id })
     showToast(`Revoked access for ${devName}`)
   }
 
@@ -244,17 +251,62 @@ function SettingsView() {
     }
   }
 
-  // ── About State ──────────────────────────────────────
+  // ── About & Auto-Update State ─────────────────────────────
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<number>(0)
+  const [updateDownloaded, setUpdateDownloaded] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).vextaNative?.onUpdateStatus) {
+      return (window as any).vextaNative.onUpdateStatus((data: any) => {
+        if (data.status === 'checking') {
+          setCheckingUpdates(true)
+          setUpdateStatus('Checking for latest Vexta release...')
+        } else if (data.status === 'available') {
+          setCheckingUpdates(true)
+          setUpdateStatus(`New release ${data.version} found. Downloading update...`)
+        } else if (data.status === 'downloading') {
+          setCheckingUpdates(true)
+          setUpdateProgress(data.progress || 0)
+          setUpdateStatus(`Downloading v${data.version} (${data.progress}%)...`)
+        } else if (data.status === 'downloaded') {
+          setCheckingUpdates(false)
+          setUpdateDownloaded(true)
+          setUpdateStatus(`Vexta v${data.version} update ready to install!`)
+        } else if (data.status === 'up_to_date') {
+          setCheckingUpdates(false)
+          setUpdateStatus(`Vexta is up to date (v${data.version || '2.4.0-electron'})`)
+        } else if (data.status === 'error') {
+          setCheckingUpdates(false)
+          setUpdateStatus(`Update check failed: ${data.error || 'Network error'}`)
+        }
+      })
+    }
+  }, [])
 
   function handleCheckUpdates() {
     setCheckingUpdates(true)
-    setUpdateStatus(null)
-    setTimeout(() => {
-      setCheckingUpdates(false)
-      setUpdateStatus('Vexta is up to date (v2.4.0-electron)')
-    }, 1200)
+    setUpdateStatus('Checking for latest Vexta release...')
+    setUpdateProgress(0)
+    setUpdateDownloaded(false)
+
+    if (typeof window !== 'undefined' && (window as any).vextaNative?.checkForUpdates) {
+      (window as any).vextaNative.checkForUpdates()
+    } else {
+      setTimeout(() => {
+        setCheckingUpdates(false)
+        setUpdateStatus('Vexta is up to date (v2.4.0-electron)')
+      }, 1200)
+    }
+  }
+
+  function handleRestartInstall() {
+    if (typeof window !== 'undefined' && (window as any).vextaNative?.restartAndInstall) {
+      (window as any).vextaNative.restartAndInstall()
+    } else {
+      window.location.reload()
+    }
   }
 
   return (
@@ -519,6 +571,30 @@ function SettingsView() {
 
                 <div className="toggle-item">
                   <div className="toggle-info">
+                    <span className="toggle-title">Share Last Active Status</span>
+                    <span className="toggle-desc">Allow contacts to see when you are active ("Active 2m ago").</span>
+                  </div>
+                  <select
+                    className="settings-select"
+                    value={globalPresencePrivacy}
+                    onChange={(e) => {
+                      const val = e.target.value as 'everyone' | 'nobody'
+                      setGlobalPresencePrivacy(val)
+                      const activeUser = AuthSession.getActiveUser()
+                      if (activeUser) {
+                        const db = new VextaDatabaseManager(activeUser)
+                        db.setGlobalPresencePrivacy(val)
+                      }
+                      showToast(`Last active status set to ${val === 'everyone' ? 'Everyone' : 'Nobody'}`)
+                    }}
+                  >
+                    <option value="everyone">Everyone (Contacts)</option>
+                    <option value="nobody">Nobody (Private)</option>
+                  </select>
+                </div>
+
+                <div className="toggle-item">
+                  <div className="toggle-info">
                     <span className="toggle-title">Minimize to System Tray</span>
                     <span className="toggle-desc">Closing the window will minimize it to system tray instead of exiting.</span>
                   </div>
@@ -666,6 +742,11 @@ function SettingsView() {
                       <div className="device-name-row">
                         <span className="device-name">{dev.name}</span>
                         {dev.isCurrent && <span className="current-device-badge">This Device</span>}
+                        {dev.status === 'pending_approval' && (
+                          <span className="current-device-badge" style={{ background: 'rgba(255, 170, 0, 0.2)', color: '#ffaa00' }}>
+                            Pending Approval
+                          </span>
+                        )}
                       </div>
                       <span className="device-meta">
                         {dev.hardwareHash} \u00B7 {dev.lastSeen}
@@ -676,7 +757,7 @@ function SettingsView() {
                       <button
                         type="button"
                         className="btn-danger-outline"
-                        onClick={() => revokeDevice(dev.id, dev.name)}
+                        onClick={() => revokeDevice(dev.id, dev.name, dev.hardwareHash)}
                       >
                         Revoke Access
                       </button>
@@ -749,7 +830,7 @@ function SettingsView() {
               <div className="toggle-item">
                 <div className="toggle-info">
                   <span className="toggle-title">Enable Custom Bridge Address</span>
-                  <span className="toggle-desc">Connect to a self-hosted Substrata bridge relay.</span>
+                  <span className="toggle-desc">Connect to a self-hosted Vexta Network relay.</span>
                 </div>
                 <input
                   type="checkbox"
@@ -899,16 +980,43 @@ function SettingsView() {
               </div>
 
               <div className="card-actions" style={{ marginTop: '8px' }}>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleCheckUpdates}
-                  disabled={checkingUpdates}
-                >
-                  <RefreshIcon size={14} className={checkingUpdates ? 'spin' : ''} />
-                  {checkingUpdates ? 'Checking for updates...' : 'Check for Updates'}
-                </button>
+                {!updateDownloaded ? (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleCheckUpdates}
+                    disabled={checkingUpdates}
+                  >
+                    <RefreshIcon size={14} className={checkingUpdates ? 'spin' : ''} />
+                    {checkingUpdates ? 'Checking for updates...' : 'Check for Updates'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ background: '#39ff14', color: '#000', fontWeight: 'bold' }}
+                    onClick={handleRestartInstall}
+                  >
+                    <RefreshIcon size={14} />
+                    Restart &amp; Install Update
+                  </button>
+                )}
               </div>
+
+              {checkingUpdates && updateProgress > 0 && (
+                <div className="update-progress-container" style={{ marginTop: 12 }}>
+                  <div
+                    className="update-progress-bar"
+                    style={{
+                      height: 4,
+                      background: '#39ff14',
+                      width: `${updateProgress}%`,
+                      borderRadius: 2,
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+              )}
 
               {updateStatus && <p className="update-status-msg">{updateStatus}</p>}
             </div>
