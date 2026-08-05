@@ -71,6 +71,9 @@ function loadUserContacts(): Contact[] {
     const lastMsg = msgs[msgs.length - 1]
     const lastTs = lastMsg && lastMsg.timestamp ? (typeof lastMsg.timestamp === 'number' ? lastMsg.timestamp : new Date(lastMsg.timestamp).getTime()) : 0
 
+    const lastActiveIso = db.getContactLastActive(c.username)
+    const isOnline = lastActiveIso ? formatLastActive(lastActiveIso).includes('Active now') : false
+
     return {
       name: c.username,
       subtitle: lastMsg
@@ -81,7 +84,7 @@ function loadUserContacts(): Contact[] {
           ? 'Official announcements'
           : 'End-to-end encrypted',
       time: lastMsg ? formatDisplayTime(lastMsg.timestamp) || 'Recent' : 'Recent',
-      online: c.status === 'active',
+      online: isOnline || c.status === 'active',
       lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
     }
   })
@@ -146,11 +149,17 @@ function AppLayout() {
   const [signOutOpen, setSignOutOpen] = useState(false)
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('connecting')
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
+  const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0)
 
   useEffect(() => {
     bridgeClient.connect()
     presenceEngine.startHeartbeat()
     const unsub = bridgeClient.subscribeStatus(setBridgeStatus)
+
+    const unsubRequests = bridgeClient.subscribeFriendRequests((reqs) => {
+      setPendingRequestsCount(reqs ? reqs.length : 0)
+    })
+    bridgeClient.listFriendRequests()
 
     const unsubMsg = bridgeClient.subscribeMessages((msg) => {
       if (msg.sender) {
@@ -172,10 +181,15 @@ function AppLayout() {
         if (inner && typeof inner === 'object') {
           if (
             inner.type === 'file_chunk' ||
+            inner.type === 'file_init' ||
             inner.type === 'file_status_query' ||
             inner.type === 'file_status_response' ||
             inner.type === 'presence' ||
-            inner.type === 'metadata_sync'
+            inner.type === 'metadata_sync' ||
+            inner.type === 'call_offer' ||
+            inner.type === 'call_answer' ||
+            inner.type === 'call_ice' ||
+            inner.type === 'call_end'
           ) {
             return
           }
@@ -217,15 +231,35 @@ function AppLayout() {
       }
     })
 
-    const handleCleared = () => {
+    const reloadContacts = (e?: any) => {
+      const detail = (e as CustomEvent)?.detail
+      if (detail?.chatId || detail?.name) {
+        const cId = detail.chatId
+        const cName = detail.name
+        setUnreadCounts((prev) => {
+          const next = { ...prev }
+          if (cId) delete next[cId]
+          if (cName) delete next[cName]
+          return next
+        })
+      }
       setContacts(loadUserContacts())
     }
-    window.addEventListener('vexta_messages_cleared', handleCleared)
+    window.addEventListener('vexta_messages_cleared', reloadContacts)
+    window.addEventListener('vexta_contact_removed', reloadContacts)
+    window.addEventListener('vexta_contact_added', reloadContacts)
+    window.addEventListener('vexta_friend_request_updated', reloadContacts)
+    window.addEventListener('vexta_presence_updated', reloadContacts)
 
     return () => {
       unsub()
       unsubMsg()
-      window.removeEventListener('vexta_messages_cleared', handleCleared)
+      unsubRequests()
+      window.removeEventListener('vexta_messages_cleared', reloadContacts)
+      window.removeEventListener('vexta_contact_removed', reloadContacts)
+      window.removeEventListener('vexta_contact_added', reloadContacts)
+      window.removeEventListener('vexta_friend_request_updated', reloadContacts)
+      window.removeEventListener('vexta_presence_updated', reloadContacts)
       presenceEngine.stopHeartbeat()
     }
   }, [])
@@ -374,9 +408,9 @@ function AppLayout() {
             </span>
             Friends &amp; Requests
             <span className="spacer" />
-            <span className="badge" style={{ visibility: 'hidden' }}>
-              0
-            </span>
+            {pendingRequestsCount > 0 && (
+              <span className="badge">{pendingRequestsCount}</span>
+            )}
           </NavLink>
 
           <button

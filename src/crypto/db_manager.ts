@@ -310,8 +310,17 @@ export class VextaDatabaseManager {
   clearMessages(chatId: string) {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
+    const cleanId = chatId.replace(/^group_/, '')
     const filtered = all.filter(
-      (m) => m.sender !== chatId && m.recipient !== chatId && m.recipient !== `group_${chatId}` && m.sender !== `group_${chatId}`,
+      (m) =>
+        m.sender !== chatId &&
+        m.recipient !== chatId &&
+        m.recipient !== `group_${chatId}` &&
+        m.sender !== `group_${chatId}` &&
+        m.sender !== cleanId &&
+        m.recipient !== cleanId &&
+        m.sender !== `group_${cleanId}` &&
+        m.recipient !== `group_${cleanId}`,
     )
     localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
   }

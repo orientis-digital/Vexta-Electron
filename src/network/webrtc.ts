@@ -305,11 +305,27 @@ class WebRTCManager {
     }
     this.removeRemoteStream(sender)
 
-    if (this.peerConnections.size === 0) {
-      this.endCall()
-    } else {
-      this.notify()
+    if (this.state.status === 'incoming' || this.state.status === 'calling' || this.peerConnections.size === 0) {
+      this.peerConnections.forEach((p) => p.close())
+      this.peerConnections.clear()
+      if (this.state.localStream) {
+        this.state.localStream.getTracks().forEach((track) => track.stop())
+      }
+      this.state = {
+        status: 'idle',
+        target: '',
+        caller: '',
+        isGroup: false,
+        isVideo: false,
+        isMuted: false,
+        isCameraOff: false,
+        isScreenSharing: false,
+        isPopout: false,
+        localStream: null,
+        remoteStreams: [],
+      }
     }
+    this.notify()
   }
 
   private addRemoteStream(peerId: string, stream: MediaStream) {

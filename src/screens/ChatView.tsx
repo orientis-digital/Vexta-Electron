@@ -245,16 +245,22 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const savedPinned = db.getPinnedMessage(name)
       setPinnedText(savedPinned)
 
-      if (!isGroup(chatId) && !isGlobal) {
-        const globalPrivacy = db.getGlobalPresencePrivacy()
-        const friendOverride = db.getFriendPresenceOverride(name)
-        if (globalPrivacy !== 'nobody' && friendOverride !== false) {
-          const lastActiveIso = db.getContactLastActive(name)
-          setPresenceText(formatLastActive(lastActiveIso))
-        } else {
-          setPresenceText('Zero-Knowledge Channel')
+      const updatePresence = () => {
+        if (!isGroup(chatId) && !isGlobal) {
+          const globalPrivacy = db.getGlobalPresencePrivacy()
+          const friendOverride = db.getFriendPresenceOverride(name)
+          if (globalPrivacy !== 'nobody' && friendOverride !== false) {
+            const lastActiveIso = db.getContactLastActive(name)
+            setPresenceText(formatLastActive(lastActiveIso))
+          } else {
+            setPresenceText('Zero-Knowledge Channel')
+          }
         }
       }
+
+      updatePresence()
+      const pInterval = setInterval(updatePresence, 5000)
+      window.addEventListener('vexta_presence_updated', updatePresence)
 
       const dbMsgs = db.getMessages(name)
       const formatted: Message[] = dbMsgs.map((m, idx) => ({
@@ -264,10 +270,15 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         rawDate: m.timestamp,
         me: m.sender === activeUser,
         sender: m.sender,
-        timer: m.timer,
-        reactions: m.reactions,
+        voiceUrl: m.voiceUrl,
+        attachment: m.attachment,
       }))
       setMessages(formatted)
+
+      return () => {
+        clearInterval(pInterval)
+        window.removeEventListener('vexta_presence_updated', updatePresence)
+      }
     } else {
       setMessages([])
     }
@@ -276,12 +287,13 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   useEffect(() => {
     const unsubscribe = bridgeClient.subscribeMessages((msg) => {
       const activeUser = localStorage.getItem('vexta_active_user') || ''
-      let text = msg.wire_blob || msg.ciphertext || ''
+      let text = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
       try {
         if (msg.wire_blob) text = atob(msg.wire_blob)
         else if (msg.ciphertext) text = atob(msg.ciphertext)
+        else if ((msg as any).body) text = atob((msg as any).body)
       } catch {
-        text = msg.wire_blob || msg.ciphertext || ''
+        text = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
       }
 
       let inner: any = null
@@ -298,10 +310,15 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           displayText = inner.body || text
         } else if (
           inner.type === 'file_chunk' ||
+          inner.type === 'file_init' ||
           inner.type === 'file_status_query' ||
           inner.type === 'file_status_response' ||
           inner.type === 'presence' ||
-          inner.type === 'metadata_sync'
+          inner.type === 'metadata_sync' ||
+          inner.type === 'call_offer' ||
+          inner.type === 'call_answer' ||
+          inner.type === 'call_ice' ||
+          inner.type === 'call_end'
         ) {
           return
         }
@@ -318,7 +335,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         setMessages((prev) => [
           ...prev,
           {
-            id: prev.length + 1,
+            id: Date.now(),
             text: displayText,
             timestamp: formatDisplayTime(msg.timestamp),
             rawDate: msg.timestamp,
@@ -803,7 +820,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           const showTimeDivider = shouldShowTimeDivider(prevMsg, m)
 
           return (
-            <div key={m.id} className="msg-row-container">
+            <div key={`msg_${m.id}_${idx}`} className="msg-row-container">
               {/* ⏱️ Messenger-Style Time Gap Divider */}
               {showTimeDivider && (
                 <div className="time-divider-row">
@@ -829,16 +846,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                   <div className="bubble-wrapper">
                     {/* Hover Quick-Action Bar */}
                     <div className="bubble-hover-actions">
-                      <button
-                        type="button"
-                        className="action-pill-btn"
-                        title="Add Reaction"
-                        onClick={() =>
-                          setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)
-                        }
-                      >
-                        😃
-                      </button>
                       <button
                         type="button"
                         className="action-pill-btn"
@@ -931,8 +938,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                       )}
 
                       <span className="meta">
-                        {m.me && <span className="check">{'\u2713\u2713'}</span>}
-                        {m.timer && <span className="timer">{'\u23F1'}</span>}
+                        {m.me && (
+                          <span className={`check ${m.status === 'read' ? 'read' : m.status === 'delivered' ? 'delivered' : 'sent'}`}>
+                            {m.status === 'read' || m.status === 'delivered' ? '✓✓' : '✓'}
+                          </span>
+                        )}
+                        {m.timer && <span className="timer">⏱</span>}
                         {m.timestamp}
                       </span>
 

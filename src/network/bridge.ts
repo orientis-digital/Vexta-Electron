@@ -51,6 +51,37 @@ export async function computePasscodeHmac(nonceStr: string, passcode: string): P
     .join('')
 }
 
+function parseBinaryMessageFrame(rawText: string, _eventData?: any): any | null {
+  if (!rawText) return null
+
+  const msgTypes: string[] = ['BLIND_MESSAGE', 'SEND_MESSAGE', 'MESSAGE', 'RECEIVE_MESSAGE', 'FRIEND_REQUEST']
+  const matchedType: string | undefined = msgTypes.find((t) => rawText.includes(t))
+
+  if (!matchedType) return null
+
+  const tokens: string[] = Array.from(rawText.match(/[A-Za-z0-9_@.\-+=/]{2,}/g) || [])
+  const typeIdx = tokens.indexOf(matchedType)
+  const rest = typeIdx !== -1 ? tokens.slice(typeIdx + 1) : tokens
+  const cleanTokens = rest.filter((t) => t !== matchedType)
+
+  let sender = cleanTokens.find((t) => !t.includes('=') && t.length < 32 && t.length >= 3) || cleanTokens[0] || 'unknown'
+  sender = sender.replace(/^@/, '')
+
+  let wireBlob = cleanTokens.find((t) => t !== sender && t !== `@${sender}` && t.length >= 4) || cleanTokens[1] || ''
+
+  if (sender && wireBlob) {
+    return {
+      type: matchedType,
+      sender,
+      wire_blob: wireBlob,
+      ciphertext: wireBlob,
+      timestamp: Date.now(),
+    }
+  }
+
+  return null
+}
+
 export class VextaBridgeClient {
   private url: string
   private ws: WebSocket | null = null
@@ -180,13 +211,40 @@ export class VextaBridgeClient {
         }
       }
 
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = async (event) => {
         try {
-          const payload = JSON.parse(event.data)
-          console.log(`[Vexta WSS] Frame:`, payload.type || payload)
-          this.handlePayload(payload)
-        } catch {
-          console.warn(`[Vexta WSS] Raw frame:`, event.data)
+          let rawText = ''
+          if (typeof event.data === 'string') {
+            rawText = event.data
+          } else if (event.data instanceof Blob) {
+            rawText = await event.data.text()
+          } else if (event.data instanceof ArrayBuffer) {
+            rawText = new TextDecoder().decode(event.data)
+          } else {
+            rawText = String(event.data)
+          }
+
+          console.log(`[Vexta WSS] Raw string content (${rawText.length} chars):`, rawText)
+
+          let payload: any = null
+          try {
+            payload = JSON.parse(rawText)
+          } catch {
+            try {
+              payload = JSON.parse(atob(rawText.trim()))
+            } catch {
+              payload = parseBinaryMessageFrame(rawText, event.data)
+            }
+          }
+
+          if (payload) {
+            console.log(`[Vexta WSS] Decoded frame:`, payload.type, 'from @' + (payload.sender || 'unknown'))
+            this.handlePayload(payload)
+          } else {
+            console.warn(`[Vexta WSS] Non-JSON text payload received:`, rawText)
+          }
+        } catch (err) {
+          console.warn(`[Vexta WSS] Raw frame processing exception:`, err)
         }
       }
 
@@ -220,6 +278,7 @@ export class VextaBridgeClient {
       this.setStatus('connected')
       this.listFriendRequests()
       this.listFriends()
+      this.flushOutboundQueue()
     } else if (payload.type === 'FRIEND_REQUESTS_LIST') {
       console.log(`[Vexta WSS] Received FRIEND_REQUESTS_LIST:`, payload.requests)
       this.friendRequestsListeners.forEach((fn) => fn(payload.requests || []))
@@ -274,7 +333,14 @@ export class VextaBridgeClient {
     } else if (payload.type === 'DEVICE_REJECTED_EVENT') {
       console.warn(`[Vexta WSS] Received DEVICE_REJECTED_EVENT:`, payload.reason)
       this.deviceRejectionListeners.forEach((fn) => fn({ reason: payload.reason }))
-    } else if (payload.type === 'BLIND_MESSAGE' || payload.type === 'SEND_MESSAGE' || payload.type === 'MESSAGE' || payload.type === 'RECEIVE_MESSAGE') {
+    } else if (
+      (payload.type &&
+        ['blind_message', 'send_message', 'message', 'receive_message', 'relay', 'message_relay', 'direct_message'].includes(
+          String(payload.type).toLowerCase(),
+        )) ||
+      (payload.sender && (payload.ciphertext || payload.wire_blob || payload.body))
+    ) {
+      console.log(`[Vexta WSS] Received incoming message frame from @${payload.sender}:`, payload.type)
       // Send ACK frame if message has id
       if (payload.id) {
         this.sendJson({ type: 'ACK', id: payload.id, hardware_hash: 'sha256_7f8a91b2c4e57091' })
@@ -284,12 +350,13 @@ export class VextaBridgeClient {
       if (activeUser) {
         try {
           const db = new VextaDatabaseManager(activeUser)
-          let text = payload.wire_blob || payload.ciphertext || ''
+          let text = payload.wire_blob || payload.ciphertext || payload.body || ''
           try {
             if (payload.wire_blob) text = atob(payload.wire_blob)
             else if (payload.ciphertext) text = atob(payload.ciphertext)
+            else if (payload.body) text = atob(payload.body)
           } catch {
-            text = payload.wire_blob || payload.ciphertext || ''
+            text = payload.wire_blob || payload.ciphertext || payload.body || ''
           }
 
           let innerPayload: any = null
@@ -393,10 +460,9 @@ export class VextaBridgeClient {
               const isGlobalAllowed = db.getGlobalPresencePrivacy() !== 'nobody'
               const isFriendAllowed = db.getFriendPresenceOverride(payload.sender) !== false
               if (isGlobalAllowed && isFriendAllowed) {
-                db.updateContactLastActive(
-                  payload.sender,
-                  parseTs(innerPayload.timestamp || payload.timestamp),
-                )
+                const ts = parseTs(innerPayload.timestamp || payload.timestamp)
+                db.updateContactLastActive(payload.sender, ts)
+                window.dispatchEvent(new CustomEvent('vexta_presence_updated', { detail: { username: payload.sender } }))
               }
             } else if (innerPayload.type === 'metadata_sync') {
               if (innerPayload.action === 'ADD_CONTACT') {
@@ -417,6 +483,19 @@ export class VextaBridgeClient {
                 is_read: 0,
                 is_system: 1,
               })
+            } else if (
+              innerPayload.type === 'call_offer' ||
+              innerPayload.type === 'call_answer' ||
+              innerPayload.type === 'call_ice' ||
+              innerPayload.type === 'call_end' ||
+              innerPayload.type === 'file_init' ||
+              innerPayload.type === 'file_chunk' ||
+              innerPayload.type === 'file_status_query' ||
+              innerPayload.type === 'file_status_response' ||
+              innerPayload.type === 'presence' ||
+              innerPayload.type === 'metadata_sync'
+            ) {
+              // Internal signaling / control frame — do not persist to messages DB
             } else {
               db.saveMessage({
                 sender: payload.sender,
@@ -528,12 +607,31 @@ export class VextaBridgeClient {
     this.setStatus('connected')
   }
 
-  sendBlindMessage(recipient: string, wireBlob: string, selfCiphertext?: string) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[Vexta WSS] Cannot send message: socket not connected`)
-      return false
-    }
+  private offlineOutboundQueue: any[] = []
 
+  private flushOutboundQueue() {
+    try {
+      const stored = localStorage.getItem('vexta_offline_outbound_queue')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.offlineOutboundQueue = [...parsed, ...this.offlineOutboundQueue]
+        }
+      }
+    } catch {}
+
+    if (this.offlineOutboundQueue.length === 0) return
+    console.log(`[Vexta WSS] Flushing ${this.offlineOutboundQueue.length} queued offline messages...`)
+    while (this.offlineOutboundQueue.length > 0) {
+      const msg = this.offlineOutboundQueue.shift()
+      if (msg) {
+        this.sendJson(msg)
+      }
+    }
+    localStorage.removeItem('vexta_offline_outbound_queue')
+  }
+
+  sendBlindMessage(recipient: string, wireBlob: string, selfCiphertext?: string) {
     const activeUser = localStorage.getItem('vexta_active_user')
     if (!activeUser) {
       console.warn(`[Vexta WSS] Cannot send message: no active user logged in`)
@@ -551,6 +649,15 @@ export class VextaBridgeClient {
 
     if (selfCiphertext) {
       msg.self_ciphertext = selfCiphertext
+    }
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[Vexta WSS] Socket not connected. Queuing message for recipient @${recipient}...`)
+      this.offlineOutboundQueue.push(msg)
+      try {
+        localStorage.setItem('vexta_offline_outbound_queue', JSON.stringify(this.offlineOutboundQueue))
+      } catch {}
+      return false
     }
 
     console.log(`[Vexta WSS] Transmitting SEND_MESSAGE to @${recipient}`)
@@ -762,12 +869,14 @@ export class VextaBridgeClient {
     this.sendJson({ type: 'SEND_FRIEND_REQUEST', recipient })
   }
 
-  acceptFriendRequest(requestId: string) {
-    this.sendJson({ type: 'ACCEPT_FRIEND_REQUEST', request_id: requestId })
+  acceptFriendRequest(requestId: string | number) {
+    const numericId = typeof requestId === 'number' ? requestId : parseInt(String(requestId), 10)
+    this.sendJson({ type: 'ACCEPT_FRIEND_REQUEST', request_id: isNaN(numericId) ? requestId : numericId })
   }
 
-  rejectFriendRequest(requestId: string) {
-    this.sendJson({ type: 'REJECT_FRIEND_REQUEST', request_id: requestId })
+  rejectFriendRequest(requestId: string | number) {
+    const numericId = typeof requestId === 'number' ? requestId : parseInt(String(requestId), 10)
+    this.sendJson({ type: 'REJECT_FRIEND_REQUEST', request_id: isNaN(numericId) ? requestId : numericId })
   }
 
   listFriends() {
