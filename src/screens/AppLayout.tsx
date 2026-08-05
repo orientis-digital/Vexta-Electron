@@ -16,9 +16,9 @@ import {
 } from '../components/icons'
 
 import { VextaDatabaseManager } from '../crypto/db_manager'
+import { formatLastActive, presenceEngine } from '../network/presence'
 import { CallModal } from '../components/CallModal'
 import { DeviceApprovalModal } from '../components/DeviceApprovalModal'
-import { presenceEngine } from '../network/presence'
 
 const AVATAR_PALETTE = [
   '#39ff14',
