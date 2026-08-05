@@ -40,6 +40,27 @@ type Contact = {
   lastTimestamp?: number
 }
 
+function formatDisplayTime(ts: any): string {
+  if (!ts) return ''
+  if (typeof ts === 'number') {
+    const d = new Date(ts)
+    return isNaN(d.getTime()) ? String(ts) : d.toTimeString().slice(0, 5)
+  }
+  if (typeof ts === 'string') {
+    if (ts.includes('T')) {
+      const d = new Date(ts)
+      if (!isNaN(d.getTime())) {
+        const hours = String(d.getHours()).padStart(2, '0')
+        const mins = String(d.getMinutes()).padStart(2, '0')
+        return `${hours}:${mins}`
+      }
+      return ts.slice(11, 16)
+    }
+    return ts
+  }
+  return String(ts)
+}
+
 function loadUserContacts(): Contact[] {
   const activeUser = localStorage.getItem('vexta_active_user') || ''
   if (!activeUser) return []
@@ -48,7 +69,7 @@ function loadUserContacts(): Contact[] {
   const directContacts = db.getContacts().map((c) => {
     const msgs = db.getMessages(c.username)
     const lastMsg = msgs[msgs.length - 1]
-    const lastTs = lastMsg && lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : 0
+    const lastTs = lastMsg && lastMsg.timestamp ? (typeof lastMsg.timestamp === 'number' ? lastMsg.timestamp : new Date(lastMsg.timestamp).getTime()) : 0
 
     return {
       name: c.username,
@@ -59,11 +80,7 @@ function loadUserContacts(): Contact[] {
         : c.username === 'Vexta - Global Message'
           ? 'Official announcements'
           : 'End-to-end encrypted',
-      time: lastMsg
-        ? lastMsg.timestamp.includes('T')
-          ? lastMsg.timestamp.slice(11, 16)
-          : lastMsg.timestamp
-        : 'Recent',
+      time: lastMsg ? formatDisplayTime(lastMsg.timestamp) || 'Recent' : 'Recent',
       online: c.status === 'active',
       lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
     }
@@ -72,16 +89,12 @@ function loadUserContacts(): Contact[] {
   const groupContacts = db.getGroups().map((g) => {
     const msgs = db.getMessages(`group_${g.group_name}`)
     const lastMsg = msgs[msgs.length - 1]
-    const lastTs = lastMsg && lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : 0
+    const lastTs = lastMsg && lastMsg.timestamp ? (typeof lastMsg.timestamp === 'number' ? lastMsg.timestamp : new Date(lastMsg.timestamp).getTime()) : 0
 
     return {
       name: g.group_name,
       subtitle: lastMsg ? lastMsg.ciphertext : 'E2EE Group Chat',
-      time: lastMsg
-        ? lastMsg.timestamp.includes('T')
-          ? lastMsg.timestamp.slice(11, 16)
-          : lastMsg.timestamp
-        : 'Group',
+      time: lastMsg ? formatDisplayTime(lastMsg.timestamp) || 'Group' : 'Group',
       group: true,
       online: true,
       lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
@@ -141,22 +154,58 @@ function AppLayout() {
 
     const unsubMsg = bridgeClient.subscribeMessages((msg) => {
       if (msg.sender) {
+        const rawBlob = msg.wire_blob || msg.ciphertext || ''
+        let snippet = rawBlob
+        try {
+          if (rawBlob) snippet = atob(rawBlob)
+        } catch {
+          snippet = rawBlob
+        }
+
+        let inner: any = null
+        try {
+          inner = JSON.parse(snippet)
+        } catch {}
+
+        let targetName = msg.sender
+
+        if (inner && typeof inner === 'object') {
+          if (
+            inner.type === 'file_chunk' ||
+            inner.type === 'file_status_query' ||
+            inner.type === 'file_status_response' ||
+            inner.type === 'presence' ||
+            inner.type === 'metadata_sync'
+          ) {
+            return
+          }
+          if (inner.type === 'group_msg') {
+            targetName = inner.group_uuid || msg.sender
+            snippet = inner.body || snippet
+          }
+        }
+
         const nowMs = Date.now()
         setUnreadCounts((prev) => ({
           ...prev,
           [msg.sender]: (prev[msg.sender] || 0) + 1,
         }))
+
+        const formattedSubtitle = snippet.length > 25 ? snippet.slice(0, 25) + '...' : snippet
+
         setContacts((prevContacts) => {
           return prevContacts
             .map((c) => {
-              if (c.name === msg.sender || chatIdOf(c) === msg.sender) {
+              if (
+                c.name === targetName ||
+                chatIdOf(c) === targetName ||
+                c.name === msg.sender ||
+                chatIdOf(c) === msg.sender ||
+                (c.group && inner?.group_uuid && c.name.includes(inner.group_uuid))
+              ) {
                 return {
                   ...c,
-                  subtitle: msg.wire_blob
-                    ? msg.wire_blob.length > 25
-                      ? msg.wire_blob.slice(0, 25) + '...'
-                      : msg.wire_blob
-                    : c.subtitle,
+                  subtitle: formattedSubtitle || c.subtitle,
                   lastTimestamp: nowMs,
                   time: new Date().toTimeString().slice(0, 5),
                 }
@@ -168,9 +217,15 @@ function AppLayout() {
       }
     })
 
+    const handleCleared = () => {
+      setContacts(loadUserContacts())
+    }
+    window.addEventListener('vexta_messages_cleared', handleCleared)
+
     return () => {
       unsub()
       unsubMsg()
+      window.removeEventListener('vexta_messages_cleared', handleCleared)
       presenceEngine.stopHeartbeat()
     }
   }, [])
