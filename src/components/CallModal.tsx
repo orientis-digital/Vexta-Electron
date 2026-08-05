@@ -8,12 +8,54 @@ import {
   ShieldIcon,
 } from './icons'
 
+function RemoteVideoTile({ peerId, stream }: { peerId: string; stream: MediaStream }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream
+    }
+  }, [stream])
+
+  return (
+    <div className="remote-video-tile">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="remote-video-element"
+      />
+      <span className="peer-tile-label">{peerId}</span>
+    </div>
+  )
+}
+
+function LocalVideoPreview({ stream, isCameraOff }: { stream: MediaStream | null; isCameraOff: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream
+    }
+  }, [stream])
+
+  return (
+    <div className="pip-video-wrapper">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`pip-video-element ${isCameraOff ? 'hidden' : ''}`}
+      />
+      {isCameraOff && <div className="pip-video-disabled">Camera Off</div>}
+    </div>
+  )
+}
+
 export function CallModal() {
   const [callState, setCallState] = useState<WebRTCState>(webrtcManager.getState())
   const [duration, setDuration] = useState(0)
-
-  const localVideoRef = useRef<HTMLVideoElement>(null)
-  const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
 
   useEffect(() => {
     const unsubscribe = webrtcManager.subscribe((state) => {
@@ -34,23 +76,6 @@ export function CallModal() {
     }
     return () => clearInterval(timer)
   }, [callState.status])
-
-  // Attach local media stream to local video element
-  useEffect(() => {
-    if (localVideoRef.current && callState.localStream) {
-      localVideoRef.current.srcObject = callState.localStream
-    }
-  }, [callState.localStream, callState.isPopout])
-
-  // Attach remote streams to remote video elements
-  useEffect(() => {
-    callState.remoteStreams.forEach(({ peerId, stream }) => {
-      const el = remoteVideoRefs.current.get(peerId)
-      if (el && el.srcObject !== stream) {
-        el.srcObject = stream
-      }
-    })
-  }, [callState.remoteStreams, callState.isPopout])
 
   function formatTime(secs: number) {
     const m = Math.floor(secs / 60)
@@ -188,19 +213,8 @@ export function CallModal() {
         <div className="call-media-viewport">
           {callState.remoteStreams.length > 0 ? (
             <div className={`remote-video-grid items-${callState.remoteStreams.length}`}>
-              {callState.remoteStreams.map(({ peerId }) => (
-                <div key={peerId} className="remote-video-tile">
-                  <video
-                    ref={(el) => {
-                      if (el) remoteVideoRefs.current.set(peerId, el)
-                      else remoteVideoRefs.current.delete(peerId)
-                    }}
-                    autoPlay
-                    playsInline
-                    className="remote-video-element"
-                  />
-                  <span className="peer-tile-label">{peerId}</span>
-                </div>
+              {callState.remoteStreams.map(({ peerId, stream }) => (
+                <RemoteVideoTile key={peerId} peerId={peerId} stream={stream} />
               ))}
             </div>
           ) : (
@@ -215,18 +229,7 @@ export function CallModal() {
 
           {/* Picture-in-Picture Self Video Preview */}
           {callState.isVideo && (
-            <div className="pip-video-wrapper">
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`pip-video-element ${callState.isCameraOff ? 'hidden' : ''}`}
-              />
-              {callState.isCameraOff && (
-                <div className="pip-video-disabled">Camera Off</div>
-              )}
-            </div>
+            <LocalVideoPreview stream={callState.localStream} isCameraOff={callState.isCameraOff} />
           )}
         </div>
 

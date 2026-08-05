@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CopyIcon,
   DatabaseIcon,
@@ -41,6 +41,7 @@ type DeviceItem = {
   hardwareHash: string
   lastSeen: string
   isCurrent?: boolean
+  status?: string
 }
 
 function SettingsView() {
@@ -80,7 +81,7 @@ function SettingsView() {
   })
   const [screenProtection, setScreenProtection] = useState(() => {
     const val = localStorage.getItem('vx_setting_screen_protection')
-    return val !== null ? val === 'true' : true
+    return val !== null ? val === 'true' : false
   })
   const [hideNotifications, setHideNotifications] = useState(() => {
     const val = localStorage.getItem('vx_setting_hide_notifications')
@@ -179,7 +180,6 @@ function SettingsView() {
   }, [])
 
   function revokeDevice(id: string, devName: string, hardwareHash?: string) {
-    const user = AuthSession.getActiveUser() || 'guest'
     AuthSession.revokeDevice(id, hardwareHash)
     setDevices((prev) => prev.filter((d) => d.id !== id))
     showToast(`Revoked access for ${devName}`)
@@ -249,6 +249,116 @@ function SettingsView() {
       setImportError(String(err))
       setImporting(false)
     }
+  }
+
+  // ── Real Storage & Vault Database Stats ──────────────
+  const [dbStats, setDbStats] = useState({
+    dbName: 'account_guest.db',
+    sqliteSizeStr: '0 B',
+    messagesCountStr: '0 Encrypted Bubbles',
+    mediaCacheStr: '0 B',
+  })
+
+  const loadStorageStats = useCallback(() => {
+    const activeUser = AuthSession.getActiveUser() || localStorage.getItem('vexta_active_user') || 'guest'
+    const db = new VextaDatabaseManager(activeUser)
+    const dbName = `${db.getDbName()}.db`
+
+    let totalDbBytes = 0
+    const prefix = `vexta_db_${activeUser.toLowerCase()}`
+    const userPrefix = `vexta_user_${activeUser.toLowerCase()}`
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.startsWith(prefix) || key.startsWith(userPrefix))) {
+        const val = localStorage.getItem(key) || ''
+        totalDbBytes += key.length + val.length
+      }
+    }
+
+    const allMsgsData = localStorage.getItem(`${prefix}_messages`)
+    const allMsgs: any[] = allMsgsData ? JSON.parse(allMsgsData) : []
+    const messagesCount = allMsgs.length
+
+    let mediaBytes = 0
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.startsWith('vexta_chunks_') || key.startsWith('vexta_cached_media_'))) {
+        const val = localStorage.getItem(key) || ''
+        mediaBytes += val.length
+      }
+    }
+
+    const formatBytes = (bytes: number) => {
+      if (bytes === 0) return '0 B'
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+    }
+
+    setDbStats({
+      dbName,
+      sqliteSizeStr: formatBytes(totalDbBytes),
+      messagesCountStr: `${messagesCount.toLocaleString()} Encrypted Bubble${messagesCount === 1 ? '' : 's'}`,
+      mediaCacheStr: formatBytes(mediaBytes),
+    })
+  }, [])
+
+  useEffect(() => {
+    loadStorageStats()
+  }, [loadStorageStats])
+
+  function handleClearMediaCache() {
+    let freedBytes = 0
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.startsWith('vexta_chunks_') || key.startsWith('vexta_cached_media_'))) {
+        const val = localStorage.getItem(key) || ''
+        freedBytes += val.length
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k))
+    loadStorageStats()
+
+    const formatBytes = (bytes: number) => {
+      if (bytes === 0) return '0 B'
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+    }
+    showToast(`Media cache cleared (${formatBytes(freedBytes)} freed)`)
+  }
+
+  function handleExportDiagnostics() {
+    const activeUser = AuthSession.getActiveUser() || 'guest'
+    const db = new VextaDatabaseManager(activeUser)
+    const diagnostics = {
+      app_name: 'Vexta Protocol Desktop',
+      app_version: '2.4.0-electron',
+      active_user: activeUser,
+      bridge_url: bridgeClient.getUrl(),
+      bridge_status: bridgeClient.getStatus(),
+      timestamp: new Date().toISOString(),
+      vault_stats: {
+        db_name: db.getDbName(),
+        contacts_count: db.getContacts().length,
+        groups_count: db.getGroups().length,
+        file_transfers_count: db.getFileTransfers().length,
+        devices_count: db.getDevices().length,
+      },
+    }
+
+    const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `vexta_diagnostics_${activeUser}_${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('Diagnostic logs exported')
   }
 
   // ── About & Auto-Update State ─────────────────────────────
@@ -712,11 +822,72 @@ function SettingsView() {
         {/* TAB 3: DEVICES */}
         {activeTab === 'devices' && (
           <div className="settings-section-group">
+            {/* Dedicated "This Device" Card */}
             <div className="info-card">
               <div className="card-header">
                 <div className="card-title">
-                  <DesktopIcon size={16} className="accent-icon" />
-                  <h3>Linked Devices ({devices.length})</h3>
+                  <DesktopIcon size={18} className="accent-icon" />
+                  <h3>This Device</h3>
+                </div>
+                <span className="trust-tag verified">
+                  <span className="status-dot connected" />
+                  Active Session
+                </span>
+              </div>
+
+              {(() => {
+                const currentDev = devices.find((d) => d.isCurrent) || {
+                  id: 'this-device-local',
+                  name: 'Linux Desktop Workstation',
+                  type: 'desktop',
+                  hardwareHash: 'sha256_7f8a91b2c4e57091',
+                  lastSeen: 'Active Now',
+                }
+                return (
+                  <div className="profile-setting-row" style={{ background: 'rgba(57, 255, 20, 0.04)', borderColor: 'rgba(57, 255, 20, 0.2)' }}>
+                    <div className="device-icon" style={{ width: 50, height: 50, borderRadius: 14 }}>
+                      <DesktopIcon size={24} />
+                    </div>
+                    <div className="profile-setting-meta">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="profile-setting-name">{currentDev.name}</span>
+                        <span className="current-device-badge">This Device</span>
+                      </div>
+                      <span className="profile-setting-handle">Hardware Hash: {currentDev.hardwareHash}</span>
+                      <span className="profile-setting-fingerprint">
+                        Status: Connected &amp; Authorized \u00B7 {currentDev.lastSeen}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              <div className="spec-grid" style={{ marginTop: 14 }}>
+                <div className="spec-item">
+                  <span className="spec-label">Operating System</span>
+                  <span className="spec-value">Linux (x86_64)</span>
+                </div>
+                <div className="spec-item">
+                  <span className="spec-label">Client Build</span>
+                  <span className="spec-value">Vexta Desktop 2.4.0</span>
+                </div>
+                <div className="spec-item">
+                  <span className="spec-label">Session Key Bundle</span>
+                  <span className="spec-value">RSA-4096 / PSS Mounted</span>
+                </div>
+                <div className="spec-item">
+                  <span className="spec-label">Authorization Role</span>
+                  <span className="spec-value">Primary Master Node</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Other Authorized & Secondary Devices */}
+            <div className="info-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <SmartphoneIcon size={16} className="accent-icon" />
+                  <h3>Linked Secondary Devices ({devices.filter((d) => !d.isCurrent).length})</h3>
                 </div>
                 <button
                   type="button"
@@ -728,11 +899,11 @@ function SettingsView() {
                 </button>
               </div>
               <p className="card-desc">
-                Authorized hardware devices linked to this zero-knowledge account identity key.
+                Authorized mobile or desktop secondary devices linked via out-of-band PIN pairing.
               </p>
 
               <div className="device-roster">
-                {devices.map((dev) => (
+                {devices.filter((d) => !d.isCurrent).map((dev) => (
                   <div key={dev.id} className="device-row">
                     <div className="device-icon">
                       {dev.type === 'desktop' ? <DesktopIcon size={20} /> : <SmartphoneIcon size={20} />}
@@ -741,7 +912,6 @@ function SettingsView() {
                     <div className="device-info">
                       <div className="device-name-row">
                         <span className="device-name">{dev.name}</span>
-                        {dev.isCurrent && <span className="current-device-badge">This Device</span>}
                         {dev.status === 'pending_approval' && (
                           <span className="current-device-badge" style={{ background: 'rgba(255, 170, 0, 0.2)', color: '#ffaa00' }}>
                             Pending Approval
@@ -753,17 +923,22 @@ function SettingsView() {
                       </span>
                     </div>
 
-                    {!dev.isCurrent && (
-                      <button
-                        type="button"
-                        className="btn-danger-outline"
-                        onClick={() => revokeDevice(dev.id, dev.name, dev.hardwareHash)}
-                      >
-                        Revoke Access
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn-danger-outline"
+                      onClick={() => revokeDevice(dev.id, dev.name, dev.hardwareHash)}
+                    >
+                      Revoke Access
+                    </button>
                   </div>
                 ))}
+                {devices.filter((d) => !d.isCurrent).length === 0 && (
+                  <div className="empty-friends-card" style={{ padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      No secondary devices linked yet. Click "Link New Device" to pair a mobile phone or secondary laptop.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -878,19 +1053,19 @@ function SettingsView() {
               <div className="spec-grid">
                 <div className="spec-item">
                   <span className="spec-label">Database File</span>
-                  <span className="spec-value">account_guest_a8f9.db</span>
+                  <span className="spec-value">{dbStats.dbName}</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">SQLite Size</span>
-                  <span className="spec-value">14.2 MB</span>
+                  <span className="spec-value">{dbStats.sqliteSizeStr}</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Messages Stored</span>
-                  <span className="spec-value">1,284 Encrypted Bubbles</span>
+                  <span className="spec-value">{dbStats.messagesCountStr}</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Media Cache</span>
-                  <span className="spec-value">48.5 MB</span>
+                  <span className="spec-value">{dbStats.mediaCacheStr}</span>
                 </div>
               </div>
 
@@ -898,7 +1073,7 @@ function SettingsView() {
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={() => showToast('Media cache cleared (48.5 MB freed)')}
+                  onClick={handleClearMediaCache}
                 >
                   <TrashIcon size={14} />
                   Clear Media Cache
@@ -906,7 +1081,7 @@ function SettingsView() {
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={() => showToast('Diagnostic logs downloaded')}
+                  onClick={handleExportDiagnostics}
                 >
                   <DownloadIcon size={14} />
                   Export Diagnostic Logs

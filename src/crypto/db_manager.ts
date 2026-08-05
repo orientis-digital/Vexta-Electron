@@ -108,50 +108,110 @@ export class VextaDatabaseManager {
     this.initTables()
   }
 
+  private checkStorageAccess(): boolean {
+    try {
+      const testKey = `__vexta_test_${Date.now()}`
+      localStorage.setItem(testKey, '1')
+      localStorage.removeItem(testKey)
+      return true
+    } catch (err: any) {
+      console.error('[Vexta DB] Cannot access database/storage:', err)
+      if (typeof window !== 'undefined') {
+        const event = new CustomEvent('vexta:db-error', {
+          detail: { message: err?.message || 'Access to local database storage is denied or blocked' },
+        })
+        window.dispatchEvent(event)
+      }
+      return false
+    }
+  }
+
   private initTables() {
-    if (!localStorage.getItem(`${this.storageKey}_contacts`)) {
-      localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify([]))
-    }
+    if (!this.checkStorageAccess()) return
 
-    if (!localStorage.getItem(`${this.storageKey}_messages`)) {
-      localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify([]))
-    }
+    try {
+      const defaultSystemContact: DbContact = {
+        username: 'Vexta - Global Message',
+        public_key: 'SYSTEM_GLOBAL_KEY',
+        display_name: 'Vexta - Global Message',
+        created_at: new Date().toISOString(),
+        status: 'active',
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_groups`)) {
-      localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify([]))
-    }
+      if (!localStorage.getItem(`${this.storageKey}_contacts`)) {
+        localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify([defaultSystemContact]))
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_group_members`)) {
-      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify([]))
-    }
+      if (!localStorage.getItem(`${this.storageKey}_messages`)) {
+        const defaultWelcomeMsg: DbMessage = {
+          id: 1,
+          sender: 'Vexta - Global Message',
+          recipient: this.storageKey.replace('vexta_db_', ''),
+          ciphertext: 'Welcome to Vexta Protocol! All your session keys remain zero-knowledge encrypted on your device.',
+          timestamp: new Date().toISOString(),
+          is_read: 1,
+          is_system: 1,
+        }
+        localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify([defaultWelcomeMsg]))
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_file_transfers`)) {
-      localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify([]))
-    }
+      if (!localStorage.getItem(`${this.storageKey}_groups`)) {
+        localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify([]))
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_chat_timers`)) {
-      localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify({}))
-    }
+      if (!localStorage.getItem(`${this.storageKey}_group_members`)) {
+        localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify([]))
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_devices`)) {
-      localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify([]))
-    }
+      if (!localStorage.getItem(`${this.storageKey}_file_transfers`)) {
+        localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify([]))
+      }
 
-    if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
-      localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify([
-        {
-          server_host: 'vexta-api.nexusec.space',
-          server_fingerprint: '7F:3A:91:B2:C4:E5:70:91',
-          trusted_at: new Date().toISOString(),
-        },
-      ]))
+      if (!localStorage.getItem(`${this.storageKey}_chat_timers`)) {
+        localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify({}))
+      }
+
+      if (!localStorage.getItem(`${this.storageKey}_devices`)) {
+        localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify([]))
+      }
+
+      if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
+        localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify([
+          {
+            server_host: 'vexta-api.nexusec.space',
+            server_fingerprint: '7F:3A:91:B2:C4:E5:70:91',
+            trusted_at: new Date().toISOString(),
+          },
+        ]))
+      }
+    } catch (err: any) {
+      console.error('[Vexta DB] Error initializing tables:', err)
+      if (typeof window !== 'undefined') {
+        const event = new CustomEvent('vexta:db-error', {
+          detail: { message: err?.message || 'Cannot access local database storage' },
+        })
+        window.dispatchEvent(event)
+      }
     }
   }
 
   // ── Contacts API ──────────────────────────────────────
   getContacts(): DbContact[] {
     const data = localStorage.getItem(`${this.storageKey}_contacts`)
-    return data ? JSON.parse(data) : []
+    let contacts: DbContact[] = data ? JSON.parse(data) : []
+    const systemChannelName = 'Vexta - Global Message'
+    if (!contacts.some((c) => c.username === systemChannelName)) {
+      const defaultSysContact: DbContact = {
+        username: systemChannelName,
+        public_key: 'SYSTEM_GLOBAL_KEY',
+        display_name: systemChannelName,
+        created_at: new Date().toISOString(),
+        status: 'active',
+      }
+      contacts.unshift(defaultSysContact)
+      localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(contacts))
+    }
+    return contacts
   }
 
   addContact(contact: DbContact) {

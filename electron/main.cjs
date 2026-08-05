@@ -12,12 +12,26 @@ try {
   // Ignore if called before app ready on certain platforms
 }
 
+// Strict Single Instance Lock (Security First)
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 // OS Settings state
 let minimizeToTray = true
 let autoLaunch = false
 let globalHotkeysEnabled = true
 let hideNotifications = false
-let screenProtection = true
+let screenProtection = false
 
 let tray = null
 let mainWindow = null
@@ -64,8 +78,10 @@ function createWindow() {
     },
   })
 
-  if (screenProtection) {
-    mainWindow.setContentProtection(true)
+  if (screenProtection && process.platform !== 'linux') {
+    try {
+      mainWindow.setContentProtection(true)
+    } catch {}
   }
 
   if (process.env.NODE_ENV === 'development') {
@@ -73,6 +89,13 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Electron Main] Renderer process gone:', details)
+    if (details.reason !== 'clean-exit' && mainWindow) {
+      mainWindow.reload()
+    }
+  })
 
   mainWindow.on('close', (event) => {
     if (minimizeToTray && !app.isQuitting) {
@@ -252,8 +275,10 @@ ipcMain.handle('set-notification-privacy', (_event, hideContent) => {
 
 ipcMain.handle('set-screen-protection', (_event, enabled) => {
   screenProtection = !!enabled
-  if (mainWindow) {
-    mainWindow.setContentProtection(screenProtection)
+  if (mainWindow && process.platform !== 'linux') {
+    try {
+      mainWindow.setContentProtection(screenProtection)
+    } catch {}
   }
   return { success: true }
 })

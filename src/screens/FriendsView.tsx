@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { bridgeClient } from '../network/bridge'
@@ -57,6 +57,77 @@ function FriendsView() {
 
   const [friends, setFriends] = useState<Friend[]>([])
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
+
+  useEffect(() => {
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      const storedContacts = db.getContacts().filter((c) => c.username !== 'Vexta - Global Message')
+
+      const activeFriends: Friend[] = storedContacts
+        .filter((c) => c.status === 'active' || !c.status)
+        .map((c) => ({
+          id: c.username,
+          name: c.username,
+          handle: `@${c.username.toLowerCase()}`,
+          fingerprint: '4A8F : 9B1C : 2E3D : 8F7A',
+          status: 'online',
+          online: true,
+        }))
+      setFriends(activeFriends)
+
+      const pendingContacts: PendingRequest[] = storedContacts
+        .filter((c) => c.status === 'pending')
+        .map((c) => ({
+          id: c.username,
+          name: c.username,
+          handle: `@${c.username.toLowerCase()}`,
+          direction: 'outgoing',
+          time: 'Pending',
+        }))
+      setPendingRequests(pendingContacts)
+    }
+
+    bridgeClient.listFriendRequests()
+    bridgeClient.listFriends()
+
+    const unsubRequests = bridgeClient.subscribeFriendRequests((remoteReqs) => {
+      if (!Array.isArray(remoteReqs)) return
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      const mapped: PendingRequest[] = remoteReqs.map((req) => {
+        const isIncoming =
+          req.recipient === activeUser ||
+          (req.recipient && req.recipient.toLowerCase() === activeUser.toLowerCase())
+        const otherUser = isIncoming ? req.sender : req.recipient
+        return {
+          id: String(req.id),
+          name: otherUser,
+          handle: `@${otherUser.toLowerCase()}`,
+          direction: isIncoming ? 'incoming' : 'outgoing',
+          time: 'Pending',
+        }
+      })
+      setPendingRequests(mapped)
+    })
+
+    const unsubFriends = bridgeClient.subscribeFriends((remoteFriends) => {
+      if (!Array.isArray(remoteFriends)) return
+      const mapped: Friend[] = remoteFriends.map((fName) => ({
+        id: fName,
+        name: fName,
+        handle: `@${fName.toLowerCase()}`,
+        fingerprint: '7F3A : 91B2 : C4E5 : 7091',
+        status: 'online',
+        online: true,
+      }))
+      setFriends(mapped)
+    })
+
+    return () => {
+      unsubRequests()
+      unsubFriends()
+    }
+  }, [])
 
   function showToast(msg: string) {
     setToast(msg)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AuthSession } from '../crypto/session'
 import { bridgeClient } from '../network/bridge'
-import { ShieldAlert, Laptop, CheckCircle, XCircle } from 'lucide-react'
+import { CheckCircle, Laptop, ShieldAlert, XCircle } from '../components/icons'
 
 type PendingDeviceRequest = {
   deviceId: string

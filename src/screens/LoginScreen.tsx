@@ -9,7 +9,7 @@ import { AuthSession } from '../crypto/session'
 import { bridgeClient } from '../network/bridge'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
-import { ShieldCheck, ShieldAlert, Laptop, ArrowLeft, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Laptop } from '../components/icons'
 
 function SectionDivider({ label }: { label?: string }) {
   return (

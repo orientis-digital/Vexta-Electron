@@ -970,7 +970,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                   placeholder={
                     isGlobal
                       ? 'System channel — announcements only'
-                      : `Type a message (*italic*, **bold**, \`code\`, ||spoiler||)...`
+                      : 'Type a message...'
                   }
                   disabled={isGlobal}
                   rows={1}
