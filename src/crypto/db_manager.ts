@@ -38,6 +38,9 @@ export type DbMessage = {
   timer?: string
   reactions?: string[]
   is_system?: number
+  voiceUrl?: string
+  attachment?: any
+  status?: 'sent' | 'delivered' | 'read'
 }
 
 export type DbGroup = {

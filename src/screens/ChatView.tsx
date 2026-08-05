@@ -51,6 +51,7 @@ type Message = {
   isSystem?: boolean
   replyTo?: { sender: string; text: string }
   rawDate?: string | number
+  status?: 'sent' | 'delivered' | 'read'
 }
 
 const SAMPLE_MESSAGES: Message[] = []
