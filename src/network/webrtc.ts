@@ -32,6 +32,9 @@ const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ],
 }
 
@@ -50,6 +53,7 @@ class WebRTCManager {
   }
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
+  private pendingIceCandidates: Map<string, any[]> = new Map()
   private listeners: Set<(state: WebRTCState) => void> = new Set()
 
   constructor() {
@@ -233,6 +237,8 @@ class WebRTCManager {
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(this.state.sdpOffer))
+      await this.flushPendingIce(caller, pc)
+
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
 
@@ -250,6 +256,7 @@ class WebRTCManager {
     const pc = this.peerConnections.get(sender)
     if (pc) {
       await pc.setRemoteDescription(new RTCSessionDescription(sdp))
+      await this.flushPendingIce(sender, pc)
       this.state.status = 'active'
       this.notify()
     }
@@ -257,12 +264,33 @@ class WebRTCManager {
 
   private async handleInboundIce(sender: string, candidate: any) {
     const pc = this.peerConnections.get(sender)
-    if (pc && candidate) {
+    if (pc && pc.remoteDescription && candidate) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
       } catch (err) {
         console.warn('[WebRTC] Error adding ICE candidate:', err)
       }
+    } else if (candidate) {
+      let list = this.pendingIceCandidates.get(sender)
+      if (!list) {
+        list = []
+        this.pendingIceCandidates.set(sender, list)
+      }
+      list.push(candidate)
+    }
+  }
+
+  private async flushPendingIce(sender: string, pc: RTCPeerConnection) {
+    const list = this.pendingIceCandidates.get(sender)
+    if (list && list.length > 0) {
+      for (const candidate of list) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        } catch (err) {
+          console.warn('[WebRTC] Error flushing queued ICE candidate:', err)
+        }
+      }
+      this.pendingIceCandidates.delete(sender)
     }
   }
 

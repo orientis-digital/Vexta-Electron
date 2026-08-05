@@ -88,9 +88,20 @@ function loadUserContacts(): Contact[] {
     }
   })
 
-  return [...groupContacts, ...directContacts].sort(
+  const sysChannel = directContacts.find((c) => c.name === SYSTEM_CHANNEL) || {
+    name: SYSTEM_CHANNEL,
+    subtitle: 'Official announcements',
+    time: 'System',
+    online: true,
+    lastTimestamp: Infinity,
+  }
+
+  const otherDirects = directContacts.filter((c) => c.name !== SYSTEM_CHANNEL)
+  const sortedOthers = [...groupContacts, ...otherDirects].sort(
     (a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
   )
+
+  return [sysChannel, ...sortedOthers]
 }
 
 function avatarStyle(name: string, group?: boolean) {

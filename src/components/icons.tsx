@@ -1,9 +1,10 @@
 type IconProps = {
   size?: number
   className?: string
+  style?: React.CSSProperties
 }
 
-function baseProps({ size = 16, className }: IconProps) {
+function baseProps({ size = 16, className, style }: IconProps): React.SVGProps<SVGSVGElement> {
   return {
     width: size,
     height: size,
@@ -15,7 +16,8 @@ function baseProps({ size = 16, className }: IconProps) {
     strokeLinejoin: 'round',
     'aria-hidden': true,
     className,
-  } as const
+    style,
+  }
 }
 
 export function SearchIcon(props: IconProps) {
@@ -380,5 +382,67 @@ export function EyeOffIcon(props: IconProps) {
     </svg>
   )
 }
+
+export function Laptop(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <line x1="2" y1="20" x2="22" y2="20" />
+    </svg>
+  )
+}
+
+export function ShieldAlert(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M12 2.5 20 6v6c0 4.6-3.2 8.4-8 9.5C7.2 20.4 4 16.6 4 12V6l8-3.5Z" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  )
+}
+
+export function ShieldCheck(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M12 2.5 20 6v6c0 4.6-3.2 8.4-8 9.5C7.2 20.4 4 16.6 4 12V6l8-3.5Z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  )
+}
+
+export function CheckCircle(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  )
+}
+
+export function XCircle(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6M9 9l6 6" />
+    </svg>
+  )
+}
+
+export function RefreshCw(props: IconProps) {
+  return (
+    <svg {...baseProps(props)}>
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </svg>
+  )
+}
+
+export function ArrowLeft(props: IconProps) {
+  return <ArrowLeftIcon {...props} />
+}
+
 
 

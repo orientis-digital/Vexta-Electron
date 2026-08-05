@@ -68,6 +68,8 @@ export class VextaBridgeClient {
   private deviceRequestListeners: Set<(payload: { deviceId: string; deviceName: string; osName: string; pinChallenge: string; devicePubKey: string }) => void> = new Set()
   private deviceApprovalListeners: Set<(payload: { encryptedKeyBundle: string; encryptedFriendRoster?: string }) => void> = new Set()
   private deviceRejectionListeners: Set<(payload: { reason?: string }) => void> = new Set()
+  private friendRequestsListeners: Set<(requests: any[]) => void> = new Set()
+  private friendsListeners: Set<(friends: any[]) => void> = new Set()
   private chunkStorePrefix = 'vexta_chunks_'
 
   constructor(defaultUrl?: string) {
@@ -131,6 +133,20 @@ export class VextaBridgeClient {
     this.deviceRejectionListeners.add(fn)
     return () => {
       this.deviceRejectionListeners.delete(fn)
+    }
+  }
+
+  subscribeFriendRequests(fn: (requests: any[]) => void) {
+    this.friendRequestsListeners.add(fn)
+    return () => {
+      this.friendRequestsListeners.delete(fn)
+    }
+  }
+
+  subscribeFriends(fn: (friends: any[]) => void) {
+    this.friendsListeners.add(fn)
+    return () => {
+      this.friendsListeners.delete(fn)
     }
   }
 
@@ -200,6 +216,17 @@ export class VextaBridgeClient {
     } else if (payload.type === 'AUTH_SUCCESS') {
       console.log(`[Vexta WSS] AUTH_SUCCESS from relay!`)
       this.setStatus('connected')
+      this.listFriendRequests()
+      this.listFriends()
+    } else if (payload.type === 'FRIEND_REQUESTS_LIST') {
+      console.log(`[Vexta WSS] Received FRIEND_REQUESTS_LIST:`, payload.requests)
+      this.friendRequestsListeners.forEach((fn) => fn(payload.requests || []))
+    } else if (payload.type === 'FRIENDS_LIST') {
+      console.log(`[Vexta WSS] Received FRIENDS_LIST:`, payload.friends)
+      this.friendsListeners.forEach((fn) => fn(payload.friends || []))
+    } else if (payload.type === 'FRIEND_REQUEST_SENT') {
+      console.log(`[Vexta WSS] FRIEND_REQUEST_SENT confirmed for:`, payload.recipient)
+      this.listFriendRequests()
     } else if (payload.type === 'AUTH_ERROR') {
       console.error(`[Vexta WSS] AUTH_ERROR from relay:`, payload.message || payload.reason)
       this.setStatus('auth_failed')
@@ -267,13 +294,20 @@ export class VextaBridgeClient {
             innerPayload = null
           }
 
+          const parseTs = (ts: any): string => {
+            if (typeof ts === 'number') return new Date(ts).toISOString()
+            if (typeof ts === 'string' && ts) return ts
+            return new Date().toISOString()
+          }
+          const msgTimestamp = parseTs(payload.timestamp)
+
           if (innerPayload && typeof innerPayload === 'object') {
             if (innerPayload.type === 'group_msg') {
               db.saveMessage({
                 sender: `group_${innerPayload.group_uuid}`,
                 recipient: activeUser,
                 ciphertext: innerPayload.body || text,
-                timestamp: payload.timestamp || new Date().toISOString(),
+                timestamp: msgTimestamp,
                 is_read: 0,
               })
             } else if (innerPayload.type === 'group_invite') {
@@ -281,14 +315,14 @@ export class VextaBridgeClient {
                 group_id: innerPayload.group_uuid,
                 group_name: innerPayload.group_name || 'Group Chat',
                 creator: payload.sender,
-                created_at: payload.timestamp || new Date().toISOString(),
+                created_at: msgTimestamp,
               }, innerPayload.members || [payload.sender, activeUser])
             } else if (innerPayload.type === 'group_update') {
               db.saveGroup({
                 group_id: innerPayload.group_uuid,
                 group_name: innerPayload.group_name || 'Group Chat',
                 creator: payload.sender,
-                created_at: payload.timestamp || new Date().toISOString(),
+                created_at: msgTimestamp,
               }, innerPayload.members)
             } else if (innerPayload.type === 'group_kick') {
               db.deleteGroup(innerPayload.group_uuid)
@@ -305,7 +339,7 @@ export class VextaBridgeClient {
                 sender: payload.sender,
                 recipient: activeUser,
                 status: 'pending',
-                created_at: payload.timestamp || new Date().toISOString(),
+                created_at: msgTimestamp,
               })
             } else if (innerPayload.type === 'file_chunk') {
               const transfer = db.getFileTransfer(innerPayload.transfer_id)
@@ -356,7 +390,7 @@ export class VextaBridgeClient {
               if (isGlobalAllowed && isFriendAllowed) {
                 db.updateContactLastActive(
                   payload.sender,
-                  innerPayload.timestamp || payload.timestamp || new Date().toISOString(),
+                  parseTs(innerPayload.timestamp || payload.timestamp),
                 )
               }
             } else if (innerPayload.type === 'metadata_sync') {
@@ -374,7 +408,7 @@ export class VextaBridgeClient {
                 sender: 'Vexta - Global Message',
                 recipient: activeUser,
                 ciphertext: innerPayload.announcement || text,
-                timestamp: payload.timestamp || new Date().toISOString(),
+                timestamp: msgTimestamp,
                 is_read: 0,
                 is_system: 1,
               })
@@ -383,7 +417,7 @@ export class VextaBridgeClient {
                 sender: payload.sender,
                 recipient: payload.recipient,
                 ciphertext: text,
-                timestamp: payload.timestamp || new Date().toISOString(),
+                timestamp: msgTimestamp,
                 is_read: 0,
               })
             }
@@ -392,7 +426,7 @@ export class VextaBridgeClient {
               sender: payload.sender,
               recipient: payload.recipient,
               ciphertext: text,
-              timestamp: payload.timestamp || new Date().toISOString(),
+              timestamp: msgTimestamp,
               is_read: 0,
             })
           }
@@ -507,7 +541,7 @@ export class VextaBridgeClient {
       recipient,
       ciphertext: wireBlob,
       wire_blob: wireBlob,
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
     }
 
     if (selfCiphertext) {
