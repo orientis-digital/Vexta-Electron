@@ -88,14 +88,23 @@ Browser-like headers (`User-Agent`, `Host`, `Origin`, `Referer`,
 | `UPDATE_RECOVERY_LOCK` | `lock_hash` (SHA-256 of recovery code) |
 | `LIST_DEVICES` | — |
 | `REVOKE_DEVICE` | `hardware_hash` |
+| `DEVICE_LOGIN_REQUEST` | `username`, `device_name`, `os_name`, `device_pubkey`, `pin_challenge_hash` |
+| `APPROVE_DEVICE` | `target_device_id`, `encrypted_key_bundle`, `encrypted_friend_roster` |
+| `REJECT_DEVICE` | `target_device_id` |
+| `SYNC_FRIEND_ROSTER` | `encrypted_roster_blob` |
+| `GET_FRIEND_ROSTER` | — |
 
 ### Server → Client messages
 
 | Type | Payload | Notes |
 |---|---|---|
 | `AUTH_CHALLENGE` | `nonce`, `server_public_key`, `server_signature` | initiate handshake |
-| `AUTH_SUCCESS` | `user_id`, `first_login` | `first_login` triggers key upload |
+| `AUTH_SUCCESS` | `user_id`, `first_login`, `device_status?` | `device_status`: "active" or "pending_approval" |
 | `AUTH_ERROR` | `message` | |
+| `PUSH_DEVICE_REQUEST` | `device_id`, `device_name`, `os_name`, `pin_challenge`, `device_pubkey` | sent to primary active device when new device requests authorization |
+| `DEVICE_APPROVED_EVENT` | `encrypted_key_bundle`, `encrypted_friend_roster` | sent to pending device upon primary device approval |
+| `DEVICE_REJECTED_EVENT` | `reason` | sent to pending device upon primary device rejection |
+| `FRIEND_ROSTER_RESPONSE` | `encrypted_roster_blob` | returns encrypted friend roster for synced setup |
 | `BLIND_MESSAGE` | `sender`, `ciphertext`, `id`, `timestamp` | relayed E2EE message |
 | `PREKEY_BUNDLE` | `username`, `identity_key` | contact key refresh |
 | `VAULT_RESPONSE` | `enc_vault` | during account recovery |

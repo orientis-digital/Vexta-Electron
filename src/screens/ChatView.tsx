@@ -29,8 +29,9 @@ import { VoiceRecorder } from '../components/VoiceRecorder'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { MediaLightbox } from '../components/MediaLightbox'
 import type { LightboxItem } from '../components/MediaLightbox'
-
 import { webrtcManager } from '../network/webrtc'
+
+import { formatLastActive } from '../network/presence'
 
 type Attachment = { kind: 'file' | 'photo' | 'video'; name: string; size: string; url?: string }
 type AttachmentKind = Attachment['kind']
@@ -48,6 +49,8 @@ type Message = {
   timer?: string
   reactions?: string[]
   isSystem?: boolean
+  replyTo?: { sender: string; text: string }
+  rawDate?: string
 }
 
 const SAMPLE_MESSAGES: Message[] = []
@@ -102,6 +105,45 @@ function attachmentLabel(a: Attachment) {
   return 'Document'
 }
 
+// ── Time-Gap Divider Helpers ─────────────────────────────
+function parseMessageDate(m: Message): Date {
+  if (m.rawDate) return new Date(m.rawDate)
+  const now = new Date()
+  if (m.timestamp && m.timestamp.includes(':')) {
+    const [h, min] = m.timestamp.split(':').map(Number)
+    if (!isNaN(h) && !isNaN(min)) {
+      const d = new Date(now)
+      d.setHours(h, min, 0, 0)
+      return d
+    }
+  }
+  return now
+}
+
+function shouldShowTimeDivider(prev: Message | null, curr: Message): boolean {
+  if (!prev) return true
+  const prevDate = parseMessageDate(prev)
+  const currDate = parseMessageDate(curr)
+
+  const isDiffDay = prevDate.toDateString() !== currDate.toDateString()
+  const isBigGap = Math.abs(currDate.getTime() - prevDate.getTime()) >= 3600000 // 1 hour
+
+  return isDiffDay || isBigGap
+}
+
+function formatTimeDivider(m: Message): string {
+  const d = parseMessageDate(m)
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (isToday) {
+    return `TODAY AT ${timeStr}`
+  }
+  const dateStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+  return `${dateStr.toUpperCase()} AT ${timeStr}`
+}
+
 type ChatViewProps = {
   showInfo?: boolean
 }
@@ -115,11 +157,16 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
   const isGlobal = chatId === 'Vexta - Global Message'
   const name = isGroup(chatId) ? chatId.slice(6) : chatId
+
+  const [presenceText, setPresenceText] = useState<string>('')
+  const [bridgeStatus, setBridgeStatus] = useState<string>('connected')
+  const [pinnedText, setPinnedText] = useState<string | null>(null)
+  const [matchIndex, setMatchIndex] = useState<number>(0)
   const subtitle = isGlobal
     ? 'Official Announcement Channel'
     : isGroup(chatId)
       ? 'E2EE Group Chat'
-      : 'Zero-Knowledge Channel'
+      : presenceText || 'Zero-Knowledge Channel'
 
   const [messages, setMessages] = useState<Message[]>(SAMPLE_MESSAGES)
   const [draft, setDraft] = useState('')
@@ -137,6 +184,8 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<number | null>(null)
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null)
+  const [chatTheme, setChatTheme] = useState<string>('cyber_neon')
 
   const nextId = useRef(SAMPLE_MESSAGES.length + 1)
   const listRef = useRef<HTMLDivElement>(null)
@@ -149,7 +198,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     setRecording(false)
     setSearchOpen(false)
     setSearchQuery('')
+    setReplyingTo(null)
   }, [chatId, name])
+
+  useEffect(() => {
+    return bridgeClient.subscribeStatus(setBridgeStatus)
+  }, [])
 
   useEffect(() => {
     const activeUser = localStorage.getItem('vexta_active_user') || ''
@@ -158,20 +212,39 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const savedTimer = db.getChatTimer(name)
       if (savedTimer) setTimer(savedTimer)
 
+      const savedTheme = db.getChatTheme(name)
+      if (savedTheme) setChatTheme(savedTheme)
+
+      const savedPinned = db.getPinnedMessage(name)
+      setPinnedText(savedPinned)
+
+      if (!isGroup(chatId) && !isGlobal) {
+        const globalPrivacy = db.getGlobalPresencePrivacy()
+        const friendOverride = db.getFriendPresenceOverride(name)
+        if (globalPrivacy !== 'nobody' && friendOverride !== false) {
+          const lastActiveIso = db.getContactLastActive(name)
+          setPresenceText(formatLastActive(lastActiveIso))
+        } else {
+          setPresenceText('Zero-Knowledge Channel')
+        }
+      }
+
       const dbMsgs = db.getMessages(name)
       const formatted: Message[] = dbMsgs.map((m, idx) => ({
         id: idx + 1,
         text: m.ciphertext,
-        timestamp: m.timestamp,
+        timestamp: m.timestamp.includes('T') ? m.timestamp.slice(11, 16) : m.timestamp,
+        rawDate: m.timestamp,
         me: m.sender === activeUser,
         sender: m.sender,
         timer: m.timer,
+        reactions: m.reactions,
       }))
       setMessages(formatted)
     } else {
       setMessages([])
     }
-  }, [name])
+  }, [name, chatId, isGlobal])
 
   useEffect(() => {
     const unsubscribe = bridgeClient.subscribeMessages((msg) => {
@@ -186,7 +259,8 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           {
             id: prev.length + 1,
             text,
-            timestamp: msg.timestamp,
+            timestamp: msg.timestamp.includes('T') ? msg.timestamp.slice(11, 16) : msg.timestamp,
+            rawDate: msg.timestamp,
             me: msg.sender === activeUser,
             sender: msg.sender,
           },
@@ -322,20 +396,32 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       }
     }
 
+    const replySnippet = replyingTo
+      ? {
+          sender: replyingTo.me ? 'You' : replyingTo.sender || name,
+          text: replyingTo.text || replyingTo.attachment?.name || 'Attachment',
+        }
+      : undefined
+
     setMessages((prev) => [
       ...prev,
       {
         id: nextId.current++,
         text: text || undefined,
         timestamp: nowTimestamp(),
+        rawDate: new Date().toISOString(),
         me: true,
         attachment: attachment || undefined,
         timer: timer || undefined,
+        replyTo: replySnippet,
       },
     ])
+
     setDraft('')
     setAttachment(null)
     setSelectedFileObj(null)
+    setReplyingTo(null)
+
     const field = fieldRef.current
     if (field) {
       field.style.height = 'auto'
@@ -387,6 +473,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       {
         id: nextId.current++,
         timestamp: nowTimestamp(),
+        rawDate: new Date().toISOString(),
         me: true,
         voiceUrl,
         timer: timer || undefined,
@@ -433,6 +520,25 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     setActiveReactionMsgId(null)
   }
 
+  function handlePinMessage(msg: Message) {
+    if (!msg.text) return
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser && name) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.setPinnedMessage(name, msg.text)
+      setPinnedText(msg.text)
+    }
+  }
+
+  function handleUnpin() {
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    if (activeUser && name) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.setPinnedMessage(name, null)
+      setPinnedText(null)
+    }
+  }
+
   function openMediaLightbox(currentMsg: Message) {
     const items: LightboxItem[] = []
     let initialIdx = 0
@@ -461,12 +567,13 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     return (
       (m.text && m.text.toLowerCase().includes(q)) ||
       (m.attachment && m.attachment.name.toLowerCase().includes(q))
-    );
+    )
   })
 
   return (
     <div
       className={`screen-pane chat-view ${isDragging ? 'dragging' : ''}`}
+      data-chat-theme={chatTheme}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -486,6 +593,14 @@ function ChatView({ showInfo = false }: ChatViewProps) {
             <h3>Drop Files Here</h3>
             <p>Files will be encrypted and sent via Vexta Zero-Knowledge Transfer</p>
           </div>
+        </div>
+      )}
+
+      {/* Reconnection Banner */}
+      {bridgeStatus !== 'connected' && (
+        <div className="reconnect-banner">
+          <span className="reconnect-dot" />
+          <span>Reconnecting to Vexta Relay Network...</span>
         </div>
       )}
 
@@ -536,6 +651,19 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         </div>
       </div>
 
+      {/* Pinned Message Banner */}
+      {pinnedText && (
+        <div className="pinned-message-bar">
+          <div className="pinned-meta">
+            <span className="pinned-badge">📌 PINNED</span>
+            <span className="pinned-text">{pinnedText}</span>
+          </div>
+          <button type="button" className="unpin-btn" onClick={handleUnpin} title="Unpin message">
+            <CloseIcon size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Search Bar */}
       {searchOpen && (
         <div className="chat-search-bar">
@@ -544,9 +672,41 @@ function ChatView({ showInfo = false }: ChatViewProps) {
             className="modal-input"
             placeholder="Search decrypted messages..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value)
+              setMatchIndex(0)
+            }}
             autoFocus
           />
+          {searchQuery.trim() && (
+            <div className="search-nav-controls">
+              <span className="search-count">
+                {filteredMessages.length === 0
+                  ? 'No matches'
+                  : `${matchIndex + 1} of ${filteredMessages.length}`}
+              </span>
+              <button
+                type="button"
+                className="icon-btn search-nav-btn"
+                disabled={filteredMessages.length === 0}
+                onClick={() =>
+                  setMatchIndex((prev) => (prev > 0 ? prev - 1 : filteredMessages.length - 1))
+                }
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="icon-btn search-nav-btn"
+                disabled={filteredMessages.length === 0}
+                onClick={() =>
+                  setMatchIndex((prev) => (prev < filteredMessages.length - 1 ? prev + 1 : 0))
+                }
+              >
+                ▼
+              </button>
+            </div>
+          )}
           {searchQuery && (
             <button
               type="button"
@@ -569,109 +729,187 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           </span>
         </div>
 
-        {filteredMessages.map((m) =>
-          m.isSystem ? (
-            <div key={m.id} className="system-msg-row">
-              <span className="system-msg-pill">📢 {m.text}</span>
-            </div>
-          ) : (
-            <div
-              key={m.id}
-              className={`msg-row ${m.me ? 'me' : 'them'}`}
-              onMouseLeave={() => setActiveReactionMsgId(null)}
-            >
-            {!m.me && isGroup(chatId) && (
-              <span className="sender-label">{m.sender || 'Peer'}</span>
-            )}
-            <div className="bubble-wrapper">
-              <div className={`bubble ${m.me ? 'me' : 'them'}`}>
-                {/* Reaction Picker Bar */}
-                <button
-                  type="button"
-                  className="reaction-trigger-btn"
-                  title="Add reaction"
-                  onClick={() =>
-                    setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)
-                  }
+        {filteredMessages.map((m, idx) => {
+          const prevMsg = idx > 0 ? filteredMessages[idx - 1] : null
+          const showTimeDivider = shouldShowTimeDivider(prevMsg, m)
+
+          return (
+            <div key={m.id} className="msg-row-container">
+              {/* ⏱️ Messenger-Style Time Gap Divider */}
+              {showTimeDivider && (
+                <div className="time-divider-row">
+                  <span className="time-divider-line" />
+                  <span className="time-divider-badge">{formatTimeDivider(m)}</span>
+                  <span className="time-divider-line" />
+                </div>
+              )}
+
+              {m.isSystem ? (
+                <div className="system-msg-row">
+                  <span className="system-msg-pill">📢 {m.text}</span>
+                </div>
+              ) : (
+                <div
+                  className={`msg-row ${m.me ? 'me' : 'them'}`}
+                  onMouseLeave={() => setActiveReactionMsgId(null)}
                 >
-                  +
-                </button>
+                  {!m.me && isGroup(chatId) && (
+                    <span className="sender-label">{m.sender || 'Peer'}</span>
+                  )}
 
-                {activeReactionMsgId === m.id && (
-                  <div className="emoji-reaction-picker">
-                    {EMOJI_REACTIONS.map((emoji) => (
+                  <div className="bubble-wrapper">
+                    {/* Hover Quick-Action Bar */}
+                    <div className="bubble-hover-actions">
                       <button
-                        key={emoji}
                         type="button"
-                        className="emoji-btn"
-                        onClick={() => addReaction(m.id, emoji)}
+                        className="action-pill-btn"
+                        title="Add Reaction"
+                        onClick={() =>
+                          setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)
+                        }
                       >
-                        {emoji}
+                        😃
                       </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Voice Note Audio Player */}
-                {m.voiceUrl ? (
-                  <AudioPlayer src={m.voiceUrl} />
-                ) : (
-                  <>
-                    {/* Attachments */}
-                    {m.attachment && (
-                      <div
-                        className={`file-card ${m.attachment.url ? 'clickable-media' : ''}`}
-                        onClick={() => m.attachment?.url && openMediaLightbox(m)}
+                      <button
+                        type="button"
+                        className="action-pill-btn"
+                        title="Reply"
+                        onClick={() => setReplyingTo(m)}
                       >
-                        {m.attachment.url && m.attachment.kind === 'photo' ? (
-                          <img
-                            src={m.attachment.url}
-                            alt={m.attachment.name}
-                            className="chat-img-thumb"
-                          />
-                        ) : (
-                          <>
-                            <span className="file-icon">{attachmentIcon(m.attachment)}</span>
-                            <span className="file-meta">
-                              <b>{m.attachment.name}</b>
-                              <small>
-                                {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
-                              </small>
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    )}
+                        ↩️
+                      </button>
+                      <button
+                        type="button"
+                        className="action-pill-btn"
+                        title="Copy text"
+                        onClick={() => {
+                          if (m.text) navigator.clipboard.writeText(m.text)
+                        }}
+                      >
+                        📋
+                      </button>
+                      {m.text && (
+                        <button
+                          type="button"
+                          className="action-pill-btn"
+                          title="Pin Message"
+                          onClick={() => handlePinMessage(m)}
+                        >
+                          📌
+                        </button>
+                      )}
+                    </div>
 
-                    {/* Markdown Message Content */}
-                    {m.text && <MarkdownMessage content={m.text} />}
-                  </>
-                )}
+                    <div className={`bubble ${m.me ? 'me' : 'them'}`}>
+                      {/* Emoji Reaction Picker Popover */}
+                      {activeReactionMsgId === m.id && (
+                        <div className="emoji-reaction-picker">
+                          {EMOJI_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              className="emoji-btn"
+                              onClick={() => addReaction(m.id, emoji)}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
-                <span className="meta">
-                  {m.me && <span className="check">{'\u2713\u2713'}</span>}
-                  {m.timer && <span className="timer">{'\u23F1'}</span>}
-                  {m.timestamp}
-                </span>
+                      {/* Quoted Message Snippet */}
+                      {m.replyTo && (
+                        <div className="quoted-reply-snippet">
+                          <span className="quoted-sender">{m.replyTo.sender}</span>
+                          <span className="quoted-text">{m.replyTo.text}</span>
+                        </div>
+                      )}
 
-                {/* Reaction Badges */}
-                {m.reactions && m.reactions.length > 0 && (
-                  <div className="msg-reactions-list">
-                    {m.reactions.map((r, idx) => (
-                      <span key={idx} className="reaction-badge">
-                        {r}
+                      {/* Voice Note Audio Player */}
+                      {m.voiceUrl ? (
+                        <AudioPlayer src={m.voiceUrl} />
+                      ) : (
+                        <>
+                          {/* Attachments */}
+                          {m.attachment && (
+                            <div
+                              className={`file-card ${m.attachment.url ? 'clickable-media' : ''}`}
+                              onClick={() => m.attachment?.url && openMediaLightbox(m)}
+                            >
+                              {m.attachment.url && m.attachment.kind === 'photo' ? (
+                                <img
+                                  src={m.attachment.url}
+                                  alt={m.attachment.name}
+                                  className="chat-img-thumb"
+                                />
+                              ) : (
+                                <>
+                                  <span className="file-icon">{attachmentIcon(m.attachment)}</span>
+                                  <span className="file-meta">
+                                    <b>{m.attachment.name}</b>
+                                    <small>
+                                      {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
+                                    </small>
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Markdown Message Content */}
+                          {m.text && <MarkdownMessage content={m.text} />}
+                        </>
+                      )}
+
+                      <span className="meta">
+                        {m.me && <span className="check">{'\u2713\u2713'}</span>}
+                        {m.timer && <span className="timer">{'\u23F1'}</span>}
+                        {m.timestamp}
                       </span>
-                    ))}
+
+                      {/* Reaction Badges */}
+                      {m.reactions && m.reactions.length > 0 && (
+                        <div className="msg-reactions-list">
+                          {m.reactions.map((r, idx) => (
+                            <span key={idx} className="reaction-badge">
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Composer */}
       <div className="composer-wrap">
+        {/* Quoted Reply Bar Above Composer */}
+        {replyingTo && (
+          <div className="composer-reply-bar">
+            <div className="reply-bar-meta">
+              <span className="reply-bar-title">
+                Replying to <b>{replyingTo.me ? 'yourself' : replyingTo.sender || name}</b>
+              </span>
+              <span className="reply-bar-snippet">
+                {replyingTo.text || replyingTo.attachment?.name || 'Attachment'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="attach-chip-x"
+              onClick={() => setReplyingTo(null)}
+              aria-label="Cancel reply"
+            >
+              {'\u00D7'}
+            </button>
+          </div>
+        )}
+
         {attachment && (
           <div className="attach-chip">
             <span className="attach-chip-icon">{attachmentIcon(attachment)}</span>

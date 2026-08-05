@@ -34,11 +34,12 @@ type ChatInfoViewProps = {
 }
 
 const WALLPAPERS = [
-  { id: 'wallpaper-default', label: 'Default Cyber', color: '#000000', border: '#2a2a2a' },
-  { id: 'wallpaper-purple_glow', label: 'Purple Glow', color: '#140d24', border: '#9b5de5' },
-  { id: 'wallpaper-deep_ocean', label: 'Deep Ocean', color: '#091e2b', border: '#00b4d8' },
-  { id: 'wallpaper-forest_night', label: 'Forest Night', color: '#0a1f13', border: '#39ff14' },
-  { id: 'wallpaper-sunset_rose', label: 'Sunset Rose', color: '#240d18', border: '#f15bb5' },
+  { id: 'cyber_neon', label: 'Cyber Neon', color: '#09150a', border: '#39ff14', accent: '#39ff14' },
+  { id: 'purple_glow', label: 'Purple Glow', color: '#140d24', border: '#9b5de5', accent: '#9b5de5' },
+  { id: 'deep_ocean', label: 'Deep Ocean', color: '#091e2b', border: '#00b4d8', accent: '#00b4d8' },
+  { id: 'sunset_rose', label: 'Sunset Rose', color: '#240d18', border: '#f15bb5', accent: '#f15bb5' },
+  { id: 'solar_amber', label: 'Solar Amber', color: '#242009', border: '#fee440', accent: '#fee440' },
+  { id: 'crimson_red', label: 'Crimson Red', color: '#240909', border: '#ff4d4f', accent: '#ff4d4f' },
 ] as const
 
 const TIMER_OPTIONS = [
@@ -107,6 +108,7 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
   const [newMemberName, setNewMemberName] = useState('')
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [sharedTransfers, setSharedTransfers] = useState<any[]>([])
+  const [friendPresenceAllow, setFriendPresenceAllow] = useState(true)
 
   // Modals state
   const [clearHistoryOpen, setClearHistoryOpen] = useState(false)
@@ -148,6 +150,11 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
 
     const savedTimer = db.getChatTimer(name)
     if (savedTimer) setTimer(savedTimer)
+
+    const savedTheme = db.getChatTheme(name)
+    if (savedTheme) setSelectedWallpaper(savedTheme)
+
+    setFriendPresenceAllow(db.getFriendPresenceOverride(name))
 
     if (isGroup) {
       const dbMembers = db.getGroupMembers(name)
@@ -404,9 +411,39 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
                     <span className="spec-value">AES-256-GCM</span>
                   </div>
                   <div className="spec-item">
-                    <span className="spec-label">Signature</span>
-                    <span className="spec-value">RSA-PSS (SHA-256)</span>
+                    <span className="spec-label">Signatures</span>
+                    <span className="spec-value">SHA-256 PSS</span>
                   </div>
+                </div>
+
+                {!isGroup && !isGlobal && (
+                  <div className="dropdown-sub-section" style={{ marginTop: 14 }}>
+                    <div className="card-title">
+                      <ShieldIcon size={14} className="accent-icon" />
+                      <h4 className="sub-title">Friend Presence Privacy</h4>
+                    </div>
+                    <div className="setting-toggle-row">
+                      <span className="setting-label">Share Last Active Status</span>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={friendPresenceAllow}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          setFriendPresenceAllow(val)
+                          const activeUser = localStorage.getItem('vexta_active_user') || ''
+                          if (activeUser && name) {
+                            const db = new VextaDatabaseManager(activeUser)
+                            db.setFriendPresenceOverride(name, val)
+                          }
+                          showToast(val ? `Sharing presence with @${name}` : `Presence hidden from @${name}`)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="spec-grid">
                   <div className="spec-item">
                     <span className="spec-label">Trust Policy</span>
                     <span className="spec-value">TOFU</span>
@@ -551,7 +588,12 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
                         style={{ background: wp.color, borderColor: wp.border }}
                         onClick={() => {
                           setSelectedWallpaper(wp.id)
-                          showToast(`Wallpaper updated to ${wp.label}`)
+                          const activeUser = localStorage.getItem('vexta_active_user') || ''
+                          if (activeUser && name) {
+                            const db = new VextaDatabaseManager(activeUser)
+                            db.setChatTheme(name, wp.id)
+                          }
+                          showToast(`Chat theme updated to ${wp.label}`)
                         }}
                       >
                         <div className="wallpaper-preview-bubbles">

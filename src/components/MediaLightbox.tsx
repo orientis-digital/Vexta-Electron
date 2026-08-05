@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CloseIcon, DownloadIcon } from './icons'
 import { saveMediaToDownloads } from '../crypto/file_transfer'
 
@@ -22,6 +22,22 @@ export function MediaLightbox({ items, initialIndex = 0, onClose }: Props) {
 
   const current = items[currentIndex]
 
+  const handleNext = useCallback(() => {
+    if (currentIndex < items.length - 1) {
+      setCurrentIndex((i) => i + 1)
+      setZoom(1)
+      setRotation(0)
+    }
+  }, [currentIndex, items.length])
+
+  const handlePrev = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex((i) => i - 1)
+      setZoom(1)
+      setRotation(0)
+    }
+  }, [currentIndex])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -30,23 +46,7 @@ export function MediaLightbox({ items, initialIndex = 0, onClose }: Props) {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentIndex, items.length])
-
-  const handleNext = () => {
-    if (currentIndex < items.length - 1) {
-      setCurrentIndex((i) => i + 1)
-      setZoom(1)
-      setRotation(0)
-    }
-  }
-
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex((i) => i - 1)
-      setZoom(1)
-      setRotation(0)
-    }
-  }
+  }, [handleNext, handlePrev, onClose])
 
   const handleDownload = async () => {
     if (!current) return

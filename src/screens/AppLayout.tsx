@@ -17,6 +17,8 @@ import {
 
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { CallModal } from '../components/CallModal'
+import { DeviceApprovalModal } from '../components/DeviceApprovalModal'
+import { presenceEngine } from '../network/presence'
 
 const AVATAR_PALETTE = [
   '#39ff14',
@@ -35,6 +37,7 @@ type Contact = {
   unread?: number
   group?: boolean
   online?: boolean
+  lastTimestamp?: number
 }
 
 function loadUserContacts(): Contact[] {
@@ -42,22 +45,52 @@ function loadUserContacts(): Contact[] {
   if (!activeUser) return []
   const db = new VextaDatabaseManager(activeUser)
 
-  const directContacts = db.getContacts().map((c) => ({
-    name: c.username,
-    subtitle: c.username === 'Vexta - Global Message' ? 'System channel' : 'End-to-end encrypted',
-    time: 'Recent',
-    online: c.status === 'active',
-  }))
+  const directContacts = db.getContacts().map((c) => {
+    const msgs = db.getMessages(c.username)
+    const lastMsg = msgs[msgs.length - 1]
+    const lastTs = lastMsg && lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : 0
 
-  const groupContacts = db.getGroups().map((g) => ({
-    name: g.group_name,
-    subtitle: 'E2EE Group Chat',
-    time: 'Group',
-    group: true,
-    online: true,
-  }))
+    return {
+      name: c.username,
+      subtitle: lastMsg
+        ? lastMsg.ciphertext.length > 25
+          ? lastMsg.ciphertext.slice(0, 25) + '...'
+          : lastMsg.ciphertext
+        : c.username === 'Vexta - Global Message'
+          ? 'Official announcements'
+          : 'End-to-end encrypted',
+      time: lastMsg
+        ? lastMsg.timestamp.includes('T')
+          ? lastMsg.timestamp.slice(11, 16)
+          : lastMsg.timestamp
+        : 'Recent',
+      online: c.status === 'active',
+      lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
+    }
+  })
 
-  return [...groupContacts, ...directContacts]
+  const groupContacts = db.getGroups().map((g) => {
+    const msgs = db.getMessages(`group_${g.group_name}`)
+    const lastMsg = msgs[msgs.length - 1]
+    const lastTs = lastMsg && lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : 0
+
+    return {
+      name: g.group_name,
+      subtitle: lastMsg ? lastMsg.ciphertext : 'E2EE Group Chat',
+      time: lastMsg
+        ? lastMsg.timestamp.includes('T')
+          ? lastMsg.timestamp.slice(11, 16)
+          : lastMsg.timestamp
+        : 'Group',
+      group: true,
+      online: true,
+      lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
+    }
+  })
+
+  return [...groupContacts, ...directContacts].sort(
+    (a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
+  )
 }
 
 function avatarStyle(name: string, group?: boolean) {
@@ -88,10 +121,47 @@ function AppLayout() {
   const [groupOpen, setGroupOpen] = useState(false)
   const [signOutOpen, setSignOutOpen] = useState(false)
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('connecting')
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
 
   useEffect(() => {
     bridgeClient.connect()
-    return bridgeClient.subscribeStatus(setBridgeStatus)
+    presenceEngine.startHeartbeat()
+    const unsub = bridgeClient.subscribeStatus(setBridgeStatus)
+
+    const unsubMsg = bridgeClient.subscribeMessages((msg) => {
+      if (msg.sender) {
+        const nowMs = Date.now()
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [msg.sender]: (prev[msg.sender] || 0) + 1,
+        }))
+        setContacts((prevContacts) => {
+          return prevContacts
+            .map((c) => {
+              if (c.name === msg.sender || chatIdOf(c) === msg.sender) {
+                return {
+                  ...c,
+                  subtitle: msg.wire_blob
+                    ? msg.wire_blob.length > 25
+                      ? msg.wire_blob.slice(0, 25) + '...'
+                      : msg.wire_blob
+                    : c.subtitle,
+                  lastTimestamp: nowMs,
+                  time: new Date().toTimeString().slice(0, 5),
+                }
+              }
+              return c
+            })
+            .sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0))
+        })
+      }
+    })
+
+    return () => {
+      unsub()
+      unsubMsg()
+      presenceEngine.stopHeartbeat()
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -138,6 +208,7 @@ function AppLayout() {
   function openChat(c: Contact) {
     const id = chatIdOf(c)
     setActiveChat(id)
+    setUnreadCounts((prev) => ({ ...prev, [c.name]: 0, [id]: 0 }))
     navigate(`/chat/${encodeURIComponent(id)}`)
   }
 
@@ -314,8 +385,10 @@ function AppLayout() {
                         </span>
                         <span className="tile-right">
                           <span className="tile-time">{c.time}</span>
-                          {c.unread != null && c.unread > 0 && (
-                            <span className="badge">{c.unread}</span>
+                          {(unreadCounts[c.name] || unreadCounts[chatIdOf(c)] || c.unread || 0) > 0 && (
+                            <span className="badge">
+                              {unreadCounts[c.name] || unreadCounts[chatIdOf(c)] || c.unread}
+                            </span>
                           )}
                         </span>
                       </div>
@@ -466,6 +539,9 @@ function AppLayout() {
 
       {/* Global E2EE WebRTC Call Overlay */}
       <CallModal />
+
+      {/* Out-of-Band Secondary Device Approval Listener */}
+      <DeviceApprovalModal />
     </div>
   )
 }

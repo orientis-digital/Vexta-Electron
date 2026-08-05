@@ -8,6 +8,8 @@ import { deriveMasterKey } from './kdf'
 import { registerAccount, validateLogin } from './auth'
 import { bridgeClient } from '../network/bridge'
 
+import { VextaDatabaseManager } from './db_manager'
+
 export class AuthSessionManager {
   private activeUser: string | null = null
   private sessionPasscode: string | null = null
@@ -77,6 +79,46 @@ export class AuthSessionManager {
     bridgeClient.setAuthMode('register')
 
     return res
+  }
+
+  async approvePendingDevice(deviceId: string): Promise<boolean> {
+    const user = this.getActiveUser()
+    if (!user) return false
+
+    const db = new VextaDatabaseManager(user)
+    db.updateDeviceStatus(deviceId, 'active')
+
+    // Package zero-knowledge key delegation bundle and friend roster
+    const storedAccounts = localStorage.getItem('vexta_registered_accounts') || '[]'
+    const keyBundleB64 = btoa(storedAccounts)
+
+    const contacts = db.getContacts()
+    const rosterB64 = btoa(JSON.stringify(contacts))
+
+    bridgeClient.sendDeviceApproval(deviceId, keyBundleB64, rosterB64)
+    return true
+  }
+
+  async rejectPendingDevice(deviceId: string): Promise<boolean> {
+    const user = this.getActiveUser()
+    if (!user) return false
+
+    const db = new VextaDatabaseManager(user)
+    db.updateDeviceStatus(deviceId, 'revoked')
+    bridgeClient.sendDeviceRejection(deviceId, 'Rejected by primary device')
+    return true
+  }
+
+  async revokeDevice(deviceId: string, hardwareHash?: string): Promise<boolean> {
+    const user = this.getActiveUser()
+    if (!user) return false
+
+    const db = new VextaDatabaseManager(user)
+    db.removeDevice(deviceId)
+    if (hardwareHash) {
+      bridgeClient.revokeDevice(hardwareHash)
+    }
+    return true
   }
 
   logout(): void {

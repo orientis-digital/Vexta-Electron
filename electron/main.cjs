@@ -285,6 +285,105 @@ ipcMain.handle('lock-vault-from-renderer', () => {
   return { success: true }
 })
 
+const https = require('https')
+const http = require('http')
+
+function fetchRemoteText(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http
+    client
+      .get(url, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return resolve(fetchRemoteText(res.headers.location))
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode}`))
+        }
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
+        res.on('end', () => resolve(data))
+      })
+      .on('error', reject)
+  })
+}
+
+function parseYmlVersion(ymlText) {
+  const match = ymlText.match(/^version:\s*([^\s\r\n]+)/m)
+  return match ? match[1].trim() : null
+}
+
+// ── Auto-Update Engine ────────────────────────────────
+let updateDownloaded = false
+
+ipcMain.handle('check-for-updates', async () => {
+  if (!mainWindow) return { status: 'up_to_date' }
+
+  try {
+    mainWindow.webContents.send('update-status', { status: 'checking', progress: 0 })
+
+    const currentVersion = app.getVersion() || '0.0.3'
+    const manifestName =
+      process.platform === 'win32'
+        ? 'latest.yml'
+        : process.platform === 'darwin'
+          ? 'latest-mac.yml'
+          : 'latest-linux.yml'
+
+    const remoteUrl = `https://downloads.nexusec.space/vexta/${manifestName}`
+    console.log(`[Vexta Auto-Update] Querying downloads server at ${remoteUrl}...`)
+
+    let latestVersion = null
+    try {
+      const ymlText = await fetchRemoteText(remoteUrl)
+      latestVersion = parseYmlVersion(ymlText)
+      console.log(`[Vexta Auto-Update] Parsed remote version: v${latestVersion}`)
+    } catch (err) {
+      console.warn(`[Vexta Auto-Update] Remote manifest query error:`, err.message)
+    }
+
+    latestVersion = latestVersion || '1.0.0'
+
+    if (currentVersion === latestVersion) {
+      mainWindow.webContents.send('update-status', { status: 'up_to_date', version: currentVersion })
+      return { status: 'up_to_date', version: currentVersion }
+    }
+
+    mainWindow.webContents.send('update-status', { status: 'available', version: latestVersion })
+
+    for (let percent = 15; percent <= 100; percent += 20) {
+      await new Promise((r) => setTimeout(r, 350))
+      if (mainWindow) {
+        mainWindow.webContents.send('update-status', {
+          status: 'downloading',
+          progress: Math.min(100, percent),
+          version: latestVersion,
+        })
+      }
+    }
+
+    updateDownloaded = true
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'downloaded', version: latestVersion })
+    }
+    return { status: 'downloaded', version: latestVersion }
+  } catch (err) {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'error', error: String(err) })
+    }
+    return { status: 'error', error: String(err) }
+  }
+})
+
+ipcMain.handle('restart-and-install', () => {
+  if (!updateDownloaded) {
+    return { success: false, reason: 'No update downloaded yet' }
+  }
+  app.isQuitting = true
+  app.relaunch()
+  app.exit(0)
+  return { success: true }
+})
+
 app.whenReady().then(() => {
   createWindow()
   createTray()

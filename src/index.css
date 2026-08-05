@@ -4167,6 +4167,121 @@ input::placeholder {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+/* ── Messenger-Style Time Gap Dividers ────────────────────────── */
+.time-divider-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 10px 0;
+  width: 100%;
+}
+
+.time-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-subtle, #333), transparent);
+}
+
+.time-divider-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary, #888);
+  background: rgba(20, 20, 20, 0.6);
+  border: 1px solid var(--border-subtle, #2a2a2a);
+  border-radius: 20px;
+  padding: 3px 12px;
+  backdrop-filter: blur(6px);
+}
+
+/* ── Quoted Reply Preview Bar ───────────────────────────────── */
+.composer-reply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(57, 255, 20, 0.08);
+  border-top: 1px solid rgba(57, 255, 20, 0.2);
+  border-left: 3px solid #39ff14;
+}
+
+.reply-bar-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reply-bar-title {
+  font-size: 11px;
+  color: #39ff14;
+}
+
+.reply-bar-snippet {
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quoted-reply-snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 3px solid #39ff14;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.quoted-sender {
+  font-weight: 700;
+  color: #39ff14;
+}
+
+.quoted-text {
+  color: #bbb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Hover Quick-Action Bar ──────────────────────────────────── */
+.bubble-hover-actions {
+  position: absolute;
+  top: -14px;
+  right: 12px;
+  display: none;
+  gap: 4px;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 20px;
+  padding: 2px 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 25;
+}
+
+.bubble-wrapper:hover .bubble-hover-actions {
+  display: flex;
+}
+
+.action-pill-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: transform 0.15s ease;
+}
+
+.action-pill-btn:hover {
+  transform: scale(1.2);
+}
+
 /* ── WebRTC Voice & Video Call Styles ───────────────────────── */
 
 /* Incoming Call Banner Overlay */
@@ -4566,6 +4681,158 @@ input::placeholder {
 .call-ctrl-btn.end-call-btn:hover {
   background: #e03133;
 }
+
+/* ── Per-Conversation Theme Presets ─────────────────────────── */
+.chat-view[data-chat-theme="cyber_neon"] {
+  --chat-accent: #39ff14;
+  --chat-bubble-me: linear-gradient(135deg, rgba(57, 255, 20, 0.18), rgba(0, 180, 216, 0.1));
+  --chat-bubble-me-border: rgba(57, 255, 20, 0.35);
+}
+
+.chat-view[data-chat-theme="purple_glow"] {
+  --chat-accent: #9b5de5;
+  --chat-bubble-me: linear-gradient(135deg, rgba(155, 93, 229, 0.22), rgba(241, 91, 181, 0.12));
+  --chat-bubble-me-border: rgba(155, 93, 229, 0.4);
+}
+
+.chat-view[data-chat-theme="deep_ocean"] {
+  --chat-accent: #00b4d8;
+  --chat-bubble-me: linear-gradient(135deg, rgba(0, 180, 216, 0.22), rgba(0, 119, 182, 0.15));
+  --chat-bubble-me-border: rgba(0, 180, 216, 0.4);
+}
+
+.chat-view[data-chat-theme="sunset_rose"] {
+  --chat-accent: #f15bb5;
+  --chat-bubble-me: linear-gradient(135deg, rgba(241, 91, 181, 0.22), rgba(254, 228, 64, 0.12));
+  --chat-bubble-me-border: rgba(241, 91, 181, 0.4);
+}
+
+.chat-view[data-chat-theme="solar_amber"] {
+  --chat-accent: #fee440;
+  --chat-bubble-me: linear-gradient(135deg, rgba(254, 228, 64, 0.22), rgba(255, 107, 107, 0.12));
+  --chat-bubble-me-border: rgba(254, 228, 64, 0.4);
+}
+
+.chat-view[data-chat-theme="crimson_red"] {
+  --chat-accent: #ff4d4f;
+  --chat-bubble-me: linear-gradient(135deg, rgba(255, 77, 79, 0.22), rgba(155, 93, 229, 0.12));
+  --chat-bubble-me-border: rgba(255, 77, 79, 0.4);
+}
+
+/* Theme variable bindings for chat bubbles and send buttons */
+.chat-view .bubble.me {
+  background: var(--chat-bubble-me, linear-gradient(135deg, rgba(57, 255, 20, 0.18), rgba(0, 180, 216, 0.1)));
+  border-color: var(--chat-bubble-me-border, rgba(57, 255, 20, 0.35));
+}
+
+.chat-view .send-btn {
+  background: var(--chat-accent, #39ff14);
+}
+
+.chat-view .mono-sub {
+  color: var(--chat-accent, #39ff14);
+}
+
+/* ── Network Reconnection Banner ────────────────────────────── */
+.reconnect-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 77, 79, 0.15);
+  border-bottom: 1px solid rgba(255, 77, 79, 0.3);
+  color: #ff4d4f;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  backdrop-filter: blur(8px);
+}
+
+.reconnect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  box-shadow: 0 0 8px #ff4d4f;
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+/* ── Pinned Message Header Bar ──────────────────────────────── */
+.pinned-message-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border-subtle, #2a2a2a);
+  backdrop-filter: blur(6px);
+}
+
+.pinned-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pinned-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--chat-accent, #39ff14);
+  background: rgba(57, 255, 20, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.pinned-text {
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unpin-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.unpin-btn:hover {
+  color: #ff4d4f;
+}
+
+/* ── Search Navigation Controls ─────────────────────────────── */
+.search-nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.search-count {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.search-nav-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+  border-radius: 4px;
+}
+
+
 
 
 

@@ -1,7 +1,7 @@
 {
   "name": "vexta",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Vexta Zero-Knowledge Encrypted Messenger",
   "author": "Vexta Team <orientisdigital.official@gmail.com>",
   "type": "module",
@@ -31,7 +31,7 @@
     "vite": "^8.2.0"
   },
   "build": {
-    "appId": "space.nexusec.vexta",
+    "appId": "com.orientisdigital.vexta",
     "productName": "Vexta",
     "files": [
       "dist/**/*",

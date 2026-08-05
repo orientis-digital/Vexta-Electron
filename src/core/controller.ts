@@ -7,20 +7,20 @@
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { deriveMasterKey, generateSaltHex } from '../crypto/kdf'
 import type { BridgeStatus } from '../network/bridge'
-import { SubstrataBridgeClient } from '../network/bridge'
+import { VextaBridgeClient } from '../network/bridge'
 
 export class VextaController {
   private username: string
   private db: VextaDatabaseManager
-  private bridge: SubstrataBridgeClient
+  private bridge: VextaBridgeClient
   private activeMasterKey: CryptoKey | null = null
 
   constructor(username = 'Guest') {
     this.username = username
     this.db = new VextaDatabaseManager(username)
-    this.bridge = new SubstrataBridgeClient('wss://vexta-api.nexusec.space/ws/chat/')
-    this.bridge.subscribeStatus((status) => this.onBridgeStatusChanged(status))
-    this.bridge.subscribeMessages((msg) => this.onInboundMessage(msg))
+    this.bridge = new VextaBridgeClient('wss://vexta-api.nexusec.space/ws/chat/')
+    this.bridge.subscribeStatus((status: BridgeStatus) => this.onBridgeStatusChanged(status))
+    this.bridge.subscribeMessages((msg: any) => this.onInboundMessage(msg))
   }
 
   getActiveMasterKey() {
