@@ -1,7 +1,7 @@
 # Vexta Electron (v0.0.5)
 
 [![Security](https://img.shields.io/badge/Security-Zero--Knowledge-brightgreen)](#cryptographic-architecture)
-[![Encryption](https://img.shields.io/badge/Encryption-E2EE%20RSA--2048%20%7C%20AES--256--GCM-blue)](#cryptographic-architecture)
+[![Encryption](https://img.shields.io/badge/Encryption-E2EE%20RSA--4096%20%7C%20AES--256--GCM-blue)](#cryptographic-architecture)
 [![Protocol](https://img.shields.io/badge/Protocol-Vexta%20V2%20Rust%20Bridge-orange)](#network--protocol)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](#)
 
@@ -11,7 +11,7 @@
 
 ## 🚀 Key Features
 
-- 🔐 **Zero-Knowledge Architecture**: Client-side RSA-2048 identity keypairs, PBKDF2 passcode hashing, and local AES-256-GCM encrypted vault storage. Private keys never touch the server relay network.
+- 🔐 **Zero-Knowledge Architecture**: Client-side RSA-4096 identity keypairs, PBKDF2 passcode hashing, and local AES-256-GCM encrypted vault storage. Private keys never touch the server relay network.
 - ⚡ **Vexta V2 Rust Bridge Integration**: Real-time WebSocket communications (`wss://vexta-api.nexusec.space/ws/chat/`) supporting both JSON and binary MessagePack payload decoding.
 - 📞 **Peer-to-Peer WebRTC Voice & Video Calling**: Full mesh and 1-on-1 voice and video calling with non-echo signaling and ICE candidate exchange.
 - 🟢 **Real-Time Presence & Heartbeat Engine**: Messenger-style 5-minute presence broadcasts with live status indicators (`● Active now`, relative last active timestamps, and sidebar status dots).
