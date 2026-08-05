@@ -17,11 +17,13 @@ export type AuthChallengePayload = {
 }
 
 export type BlindMessagePayload = {
-  type: 'BLIND_MESSAGE'
+  type: string
   sender: string
   recipient: string
-  wire_blob: string
-  timestamp: string
+  wire_blob?: string
+  ciphertext?: string
+  id?: string
+  timestamp: string | number
 }
 
 /**
@@ -232,7 +234,7 @@ export class VextaBridgeClient {
       this.setStatus('auth_failed')
     } else if (payload.type === 'ERROR') {
       console.error(`[Vexta WSS] ERROR from relay:`, payload.message)
-      if (payload.message && (payload.message.includes('revoked') || payload.message.includes('session'))) {
+      if (payload.message && typeof payload.message === 'string' && (payload.message.includes('revoked') || payload.message.includes('session'))) {
         this.setStatus('auth_failed')
       }
     } else if (payload.type === 'PUSH_DEVICE_REQUEST') {
@@ -272,7 +274,7 @@ export class VextaBridgeClient {
     } else if (payload.type === 'DEVICE_REJECTED_EVENT') {
       console.warn(`[Vexta WSS] Received DEVICE_REJECTED_EVENT:`, payload.reason)
       this.deviceRejectionListeners.forEach((fn) => fn({ reason: payload.reason }))
-    } else if (payload.type === 'BLIND_MESSAGE') {
+    } else if (payload.type === 'BLIND_MESSAGE' || payload.type === 'SEND_MESSAGE' || payload.type === 'MESSAGE' || payload.type === 'RECEIVE_MESSAGE') {
       // Send ACK frame if message has id
       if (payload.id) {
         this.sendJson({ type: 'ACK', id: payload.id, hardware_hash: 'sha256_7f8a91b2c4e57091' })
@@ -282,10 +284,13 @@ export class VextaBridgeClient {
       if (activeUser) {
         try {
           const db = new VextaDatabaseManager(activeUser)
-          let text = payload.wire_blob || payload.ciphertext
+          let text = payload.wire_blob || payload.ciphertext || ''
           try {
             if (payload.wire_blob) text = atob(payload.wire_blob)
-          } catch {}
+            else if (payload.ciphertext) text = atob(payload.ciphertext)
+          } catch {
+            text = payload.wire_blob || payload.ciphertext || ''
+          }
 
           let innerPayload: any = null
           try {

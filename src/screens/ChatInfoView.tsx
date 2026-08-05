@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   CheckIcon,
@@ -263,11 +263,31 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
   }
 
   function handleClearHistory() {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.clearMessages(name)
+      db.clearMessages(chatId)
+      window.dispatchEvent(new CustomEvent('vexta_messages_cleared', { detail: { chatId, name } }))
+    }
     setClearHistoryOpen(false)
     showToast('Chat history cleared')
   }
 
   function handleDeleteChat() {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.clearMessages(name)
+      db.clearMessages(chatId)
+      window.dispatchEvent(new CustomEvent('vexta_messages_cleared', { detail: { chatId, name } }))
+      if (isGroup) {
+        db.deleteGroup(name)
+        db.deleteGroup(chatId)
+      } else {
+        db.removeContact(name)
+      }
+    }
     setDeleteChatOpen(false)
     navigate('/')
   }
@@ -300,14 +320,14 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
           >
             <QrCodeIcon size={16} />
           </button>
-          <Link
-            to={`/chat/${encodeURIComponent(chatId)}`}
+          <button
+            type="button"
             className="btn-icon-ghost close-btn"
             title="Close Info"
             onClick={onClose}
           >
             <CloseIcon size={16} />
-          </Link>
+          </button>
         </div>
       </header>
 

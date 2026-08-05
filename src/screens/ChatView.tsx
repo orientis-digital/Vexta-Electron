@@ -50,7 +50,7 @@ type Message = {
   reactions?: string[]
   isSystem?: boolean
   replyTo?: { sender: string; text: string }
-  rawDate?: string
+  rawDate?: string | number
 }
 
 const SAMPLE_MESSAGES: Message[] = []
@@ -105,17 +105,44 @@ function attachmentLabel(a: Attachment) {
   return 'Document'
 }
 
+function formatDisplayTime(ts: any): string {
+  if (!ts) return ''
+  if (typeof ts === 'number') {
+    const d = new Date(ts)
+    return isNaN(d.getTime()) ? String(ts) : d.toTimeString().slice(0, 5)
+  }
+  if (typeof ts === 'string') {
+    if (ts.includes('T')) {
+      const d = new Date(ts)
+      if (!isNaN(d.getTime())) {
+        const hours = String(d.getHours()).padStart(2, '0')
+        const mins = String(d.getMinutes()).padStart(2, '0')
+        return `${hours}:${mins}`
+      }
+      return ts.slice(11, 16)
+    }
+    return ts
+  }
+  return String(ts)
+}
+
 // ── Time-Gap Divider Helpers ─────────────────────────────
 function parseMessageDate(m: Message): Date {
-  if (m.rawDate) return new Date(m.rawDate)
+  if (m.rawDate) {
+    const d = new Date(m.rawDate)
+    if (!isNaN(d.getTime())) return d
+  }
   const now = new Date()
-  if (m.timestamp && m.timestamp.includes(':')) {
+  if (m.timestamp && typeof m.timestamp === 'string' && m.timestamp.includes(':')) {
     const [h, min] = m.timestamp.split(':').map(Number)
     if (!isNaN(h) && !isNaN(min)) {
       const d = new Date(now)
       d.setHours(h, min, 0, 0)
       return d
     }
+  } else if (typeof m.timestamp === 'number') {
+    const d = new Date(m.timestamp)
+    if (!isNaN(d.getTime())) return d
   }
   return now
 }
@@ -233,7 +260,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const formatted: Message[] = dbMsgs.map((m, idx) => ({
         id: idx + 1,
         text: m.ciphertext,
-        timestamp: m.timestamp.includes('T') ? m.timestamp.slice(11, 16) : m.timestamp,
+        timestamp: formatDisplayTime(m.timestamp),
         rawDate: m.timestamp,
         me: m.sender === activeUser,
         sender: m.sender,
@@ -249,17 +276,51 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   useEffect(() => {
     const unsubscribe = bridgeClient.subscribeMessages((msg) => {
       const activeUser = localStorage.getItem('vexta_active_user') || ''
-      if (msg.sender === name || msg.recipient === name) {
-        let text = msg.wire_blob
-        try {
-          text = atob(msg.wire_blob)
-        } catch {}
+      let text = msg.wire_blob || msg.ciphertext || ''
+      try {
+        if (msg.wire_blob) text = atob(msg.wire_blob)
+        else if (msg.ciphertext) text = atob(msg.ciphertext)
+      } catch {
+        text = msg.wire_blob || msg.ciphertext || ''
+      }
+
+      let inner: any = null
+      try {
+        inner = JSON.parse(text)
+      } catch {}
+
+      let msgSender = msg.sender
+      let displayText = text
+
+      if (inner && typeof inner === 'object') {
+        if (inner.type === 'group_msg') {
+          msgSender = `group_${inner.group_uuid}`
+          displayText = inner.body || text
+        } else if (
+          inner.type === 'file_chunk' ||
+          inner.type === 'file_status_query' ||
+          inner.type === 'file_status_response' ||
+          inner.type === 'presence' ||
+          inner.type === 'metadata_sync'
+        ) {
+          return
+        }
+      }
+
+      const matchesTarget =
+        msg.sender === name ||
+        msg.recipient === name ||
+        msgSender === name ||
+        msgSender === chatId ||
+        (isGroup(chatId) && inner?.group_uuid && chatId.includes(inner.group_uuid))
+
+      if (matchesTarget) {
         setMessages((prev) => [
           ...prev,
           {
             id: prev.length + 1,
-            text,
-            timestamp: msg.timestamp.includes('T') ? msg.timestamp.slice(11, 16) : msg.timestamp,
+            text: displayText,
+            timestamp: formatDisplayTime(msg.timestamp),
             rawDate: msg.timestamp,
             me: msg.sender === activeUser,
             sender: msg.sender,
@@ -268,12 +329,19 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       }
     })
     return unsubscribe
-  }, [name])
+  }, [name, chatId])
 
   useEffect(() => {
-    const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages])
+    const handleCleared = (e: any) => {
+      const cId = e.detail?.chatId
+      const cName = e.detail?.name
+      if (cId === chatId || cName === name || cId === name || cName === chatId) {
+        setMessages([])
+      }
+    }
+    window.addEventListener('vexta_messages_cleared', handleCleared)
+    return () => window.removeEventListener('vexta_messages_cleared', handleCleared)
+  }, [chatId, name])
 
   function openPicker(kind: AttachItemKind) {
     if (kind === 'contact' || kind === 'location') return
@@ -578,8 +646,9 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <input
-        ref={fileInputRef}
+      <div className="chat-main-area">
+        <input
+          ref={fileInputRef}
         type="file"
         style={{ display: 'none' }}
         onChange={handleFileSelected}
@@ -1057,9 +1126,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           </div>
         )}
       </div>
+      </div>
 
-      {/* Info View Sidebar */}
-      {infoOpen && <ChatInfoView />}
+      {/* Info View Sidebar Drawer */}
+      <aside className={`chat-info-drawer ${infoOpen ? 'open' : ''}`}>
+        {infoOpen && <ChatInfoView onClose={toggleInfo} />}
+      </aside>
 
       {/* Full-Screen Media Lightbox Overlay */}
       {lightboxIndex !== null && (

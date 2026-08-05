@@ -5091,12 +5091,23 @@ input::placeholder {
 .screen-pane.chat-view {
   padding: 0 !important;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   max-height: 100vh;
   overflow: hidden !important;
   flex: 1;
   background: var(--bg-deep, #0c0c0e);
+  position: relative;
+}
+
+.chat-main-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
 }
 
 .screen-pane.chat-view .chat-header {

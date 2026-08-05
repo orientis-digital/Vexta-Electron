@@ -59,22 +59,25 @@ class WebRTCManager {
   constructor() {
     // Register signaling listeners with Bridge
     bridgeClient.subscribeMessages((msg) => {
-      let text = msg.wire_blob
+      let text = msg.wire_blob || msg.ciphertext || ''
       try {
-        text = atob(msg.wire_blob)
+        if (msg.wire_blob) text = atob(msg.wire_blob)
+        else if (msg.ciphertext) text = atob(msg.ciphertext)
       } catch {}
 
       try {
-        const payload = JSON.parse(text)
-        if (payload && typeof payload === 'object') {
-          if (payload.type === 'call_offer') {
-            this.handleInboundOffer(msg.sender, payload.sdp, payload.is_group, payload.is_video)
-          } else if (payload.type === 'call_answer') {
-            this.handleInboundAnswer(msg.sender, payload.sdp)
-          } else if (payload.type === 'call_ice') {
-            this.handleInboundIce(msg.sender, payload.candidate)
-          } else if (payload.type === 'call_end') {
-            this.handleInboundEnd(msg.sender)
+        if (text) {
+          const payload = JSON.parse(text)
+          if (payload && typeof payload === 'object') {
+            if (payload.type === 'call_offer') {
+              this.handleInboundOffer(msg.sender, payload.sdp, payload.is_group, payload.is_video)
+            } else if (payload.type === 'call_answer') {
+              this.handleInboundAnswer(msg.sender, payload.sdp)
+            } else if (payload.type === 'call_ice') {
+              this.handleInboundIce(msg.sender, payload.candidate)
+            } else if (payload.type === 'call_end') {
+              this.handleInboundEnd(msg.sender)
+            }
           }
         }
       } catch {}
