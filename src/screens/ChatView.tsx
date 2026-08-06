@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ChatInfoView from './ChatInfoView'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
+import { base64ToUtf8, utf8ToBase64 } from '../network/codec'
 import { webrtcManager } from '../network/webrtc'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
@@ -360,9 +361,9 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
       let text = rawInput
       try {
-        if (msg.wire_blob) text = atob(msg.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
-        else if (msg.ciphertext) text = atob(msg.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
-        else if ((msg as any).body) text = atob((msg as any).body.replace(/[^A-Za-z0-9+/=]/g, ''))
+        if (msg.wire_blob) text = base64ToUtf8(msg.wire_blob)
+        else if (msg.ciphertext) text = base64ToUtf8(msg.ciphertext)
+        else if ((msg as any).body) text = base64ToUtf8((msg as any).body)
       } catch {
         text = rawInput
       }
@@ -511,7 +512,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const members = db.getGroupMembers(name)
       bridgeClient.sendGroupMessage(name, members, text || attachment?.name || '')
     } else {
-      bridgeClient.sendBlindMessage(name, btoa(text || ''))
+      bridgeClient.sendBlindMessage(name, utf8ToBase64(text || ''))
     }
 
     if (selectedFileObj) {

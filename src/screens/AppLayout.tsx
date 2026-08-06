@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { BridgeStatus } from '../network/bridge'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
+import { base64ToUtf8 } from '../network/codec'
 import { AuthSession } from '../crypto/session'
 import {
   ChatPlusIcon,
@@ -225,8 +226,8 @@ function AppLayout() {
         const inner = cleanDecodePayload(rawInput)
         let snippet = rawInput
         try {
-          if (msg.wire_blob) snippet = atob(msg.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
-          else if (msg.ciphertext) snippet = atob(msg.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
+          if (msg.wire_blob) snippet = base64ToUtf8(msg.wire_blob)
+          else if (msg.ciphertext) snippet = base64ToUtf8(msg.ciphertext)
         } catch {
           snippet = rawInput
         }

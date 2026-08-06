@@ -5,6 +5,7 @@
  */
 
 import { bridgeClient, cleanDecodePayload } from './bridge'
+import { utf8ToBase64 } from './codec'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 
 export type CallStatus = 'idle' | 'incoming' | 'calling' | 'active' | 'ended'
@@ -163,7 +164,7 @@ class WebRTCManager {
       if (event.candidate) {
         bridgeClient.sendBlindMessage(
           recipient,
-          btoa(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
+          utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
         )
       }
     }
@@ -190,7 +191,7 @@ class WebRTCManager {
 
     bridgeClient.sendBlindMessage(
       recipient,
-      btoa(
+      utf8ToBase64(
         JSON.stringify({
           type: 'call_offer',
           sdp: offer,
@@ -249,7 +250,7 @@ class WebRTCManager {
         if (event.candidate) {
           bridgeClient.sendBlindMessage(
             caller,
-            btoa(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
+            utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
           )
         }
       }
@@ -277,7 +278,7 @@ class WebRTCManager {
 
       bridgeClient.sendBlindMessage(
         caller,
-        btoa(JSON.stringify({ type: 'call_answer', sdp: answer })),
+        utf8ToBase64(JSON.stringify({ type: 'call_answer', sdp: answer })),
       )
     } catch (err) {
       console.error('[WebRTC] Failed to accept call:', err)

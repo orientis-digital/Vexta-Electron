@@ -8,6 +8,7 @@ import { VextaDatabaseManager } from '../crypto/db_manager'
 import { deriveMasterKey, generateSaltHex } from '../crypto/kdf'
 import type { BridgeStatus } from '../network/bridge'
 import { VextaBridgeClient } from '../network/bridge'
+import { utf8ToBase64 } from '../network/codec'
 
 export class VextaController {
   private username: string
@@ -67,7 +68,7 @@ export class VextaController {
     })
 
     // Relay ciphertext to WSS bridge
-    this.bridge.sendBlindMessage(recipient, btoa(plaintext))
+    this.bridge.sendBlindMessage(recipient, utf8ToBase64(plaintext))
   }
 
   clearHistory(chatId: string) {
