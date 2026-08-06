@@ -393,7 +393,7 @@ export class VextaBridgeClient {
       console.log(`[Vexta WSS] Received incoming message frame from @${payload.sender}:`, payload.type)
       // Send ACK frame if message has id
       if (payload.id) {
-        this.sendJson({ type: 'ACK', id: payload.id, hardware_hash: 'sha256_7f8a91b2c4e57091' })
+        this.sendJson({ type: 'ACK', message_id: payload.id, id: payload.id, hardware_hash: 'sha256_7f8a91b2c4e57091' })
       }
 
       const activeUser = localStorage.getItem('vexta_active_user')
@@ -529,11 +529,18 @@ export class VextaBridgeClient {
                 is_read: 0,
                 is_system: 1,
               })
+            } else if (innerPayload.type === 'call_end') {
+              db.saveMessage({
+                sender: payload.sender,
+                recipient: payload.recipient,
+                ciphertext: 'CALL_EVENT:Call Ended',
+                timestamp: msgTimestamp,
+                is_read: 0,
+              })
             } else if (
               innerPayload.type === 'call_offer' ||
               innerPayload.type === 'call_answer' ||
               innerPayload.type === 'call_ice' ||
-              innerPayload.type === 'call_end' ||
               innerPayload.type === 'file_init' ||
               innerPayload.type === 'file_chunk' ||
               innerPayload.type === 'file_status_query' ||

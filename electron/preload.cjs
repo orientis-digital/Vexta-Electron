@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('vextaNative', {
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
   normalizePath: (targetPath) => ipcRenderer.invoke('normalize-path', targetPath),
   joinPaths: (...segments) => ipcRenderer.invoke('join-paths', ...segments),
+  readLocalFile: (filePath) => ipcRenderer.invoke('read-local-file-b64', filePath),
   saveCacheMedia: (data) => ipcRenderer.invoke('save-cache-media', data),
   saveToDownloads: (data) => ipcRenderer.invoke('save-to-downloads', data),
   

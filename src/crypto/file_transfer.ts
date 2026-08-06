@@ -240,22 +240,39 @@ export async function cacheReceivedMedia(
  * Uses Electron IPC when available, falls back to a browser download anchor.
  */
 export async function saveMediaToDownloads(
-  blob: Blob,
+  urlOrBlob: Blob | string,
   filename: string,
 ): Promise<{ success: boolean; filePath?: string }> {
-  const native = (window as any).vextaNative
-  if (native?.saveToDownloads) {
-    try {
-      const arrayBuffer = await blob.arrayBuffer()
-      const result = await native.saveToDownloads({ arrayBuffer, filename })
-      return { success: result.success, filePath: result.filePath }
-    } catch (err) {
-      console.warn('[Vexta Save] Electron IPC save failed, falling back to browser download:', err)
-    }
-  }
-
-  // Browser fallback: trigger anchor download
   try {
+    const native = (window as any).vextaNative
+
+    // If a file:// URL or string path is passed, pass filePath directly to Electron IPC
+    if (typeof urlOrBlob === 'string' && (urlOrBlob.startsWith('file://') || urlOrBlob.startsWith('/'))) {
+      if (native?.saveToDownloads) {
+        const result = await native.saveToDownloads({ filePath: urlOrBlob, filename })
+        if (result.success) return { success: true, filePath: result.filePath }
+      }
+    }
+
+    let blob: Blob
+    if (typeof urlOrBlob === 'string') {
+      const res = await fetch(urlOrBlob)
+      blob = await res.blob()
+    } else {
+      blob = urlOrBlob
+    }
+
+    if (native?.saveToDownloads) {
+      try {
+        const arrayBuffer = await blob.arrayBuffer()
+        const result = await native.saveToDownloads({ arrayBuffer, filename })
+        return { success: result.success, filePath: result.filePath }
+      } catch (err) {
+        console.warn('[Vexta Save] Electron IPC save failed, falling back to browser download:', err)
+      }
+    }
+
+    // Browser fallback: trigger anchor download
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -263,10 +280,10 @@ export async function saveMediaToDownloads(
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
     return { success: true }
   } catch (err) {
-    console.error('[Vexta Save] Browser download failed:', err)
+    console.error('[Vexta Save] Save to downloads failed:', err)
     return { success: false }
   }
 }

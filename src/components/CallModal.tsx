@@ -209,22 +209,12 @@ export function CallModal() {
           <div className="incoming-actions">
             <button
               type="button"
-              className="btn-call-accept voice"
-              title="Accept Voice Call"
-              onClick={() => webrtcManager.acceptCall(false)}
+              className="btn-call-accept"
+              title="Accept Call"
+              onClick={() => webrtcManager.acceptCall(callState.isVideo)}
             >
-              <MicIcon size={18} />
-              <span>Voice</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn-call-accept video"
-              title="Accept Video Call"
-              onClick={() => webrtcManager.acceptCall(true)}
-            >
-              <VideoIcon size={18} />
-              <span>Video</span>
+              {callState.isVideo ? <VideoIcon size={16} /> : <MicIcon size={16} />}
+              <span>Accept</span>
             </button>
 
             <button
@@ -233,7 +223,8 @@ export function CallModal() {
               title="Decline Call"
               onClick={() => webrtcManager.endCall()}
             >
-              <PhoneOffIcon size={18} />
+              <PhoneOffIcon size={16} />
+              <span>Decline</span>
             </button>
           </div>
         </div>

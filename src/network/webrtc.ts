@@ -457,6 +457,23 @@ class WebRTCManager {
         target,
         btoa(JSON.stringify({ type: 'call_end' })),
       )
+
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      if (activeUser) {
+        try {
+          const db = new VextaDatabaseManager(activeUser)
+          db.saveMessage({
+            sender: activeUser,
+            recipient: target,
+            ciphertext: 'CALL_EVENT:Call Ended',
+            timestamp: new Date().toISOString(),
+            is_read: 1,
+          })
+          window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: target } }))
+        } catch (e) {
+          console.warn('[Vexta WebRTC] Error saving call log:', e)
+        }
+      }
     }
 
     this.peerConnections.forEach((pc) => pc.close())
