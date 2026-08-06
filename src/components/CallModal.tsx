@@ -53,6 +53,62 @@ function LocalVideoPreview({ stream, isCameraOff }: { stream: MediaStream | null
   )
 }
 
+function AudioEqualizerVisualizer({ stream }: { stream: MediaStream | null }) {
+  const [volume, setVolume] = useState(0)
+
+  useEffect(() => {
+    if (!stream) return
+    let audioCtx: AudioContext | null = null
+    let analyser: AnalyserNode | null = null
+    let animFrame: number
+
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 64
+
+      const source = audioCtx.createMediaStreamSource(stream)
+      source.connect(analyser)
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      const updateVolume = () => {
+        analyser!.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i]
+        }
+        const avg = sum / dataArray.length
+        setVolume(Math.min(100, Math.round((avg / 128) * 100)))
+        animFrame = requestAnimationFrame(updateVolume)
+      }
+
+      updateVolume()
+    } catch (e) {
+      console.warn('[AudioVisualizer] Error setting up audio analyzer:', e)
+    }
+
+    return () => {
+      cancelAnimationFrame(animFrame)
+      if (audioCtx) {
+        try {
+          audioCtx.close()
+        } catch {}
+      }
+    }
+  }, [stream])
+
+  return (
+    <div className="audio-equalizer-bars">
+      <span className="bar" style={{ height: `${Math.max(12, volume * 0.8)}px` }} />
+      <span className="bar" style={{ height: `${Math.max(22, volume * 1.3)}px` }} />
+      <span className="bar" style={{ height: `${Math.max(8, volume * 1.6)}px` }} />
+      <span className="bar" style={{ height: `${Math.max(28, volume * 1.1)}px` }} />
+      <span className="bar" style={{ height: `${Math.max(16, volume * 0.9)}px` }} />
+    </div>
+  )
+}
+
 export function CallModal() {
   const [callState, setCallState] = useState<WebRTCState>(webrtcManager.getState())
   const [duration, setDuration] = useState(0)
@@ -75,6 +131,56 @@ export function CallModal() {
       setDuration(0)
     }
     return () => clearInterval(timer)
+  }, [callState.status])
+
+  // Acoustic Web Audio Synth Ringtone for Incoming Calls
+  useEffect(() => {
+    if (callState.status !== 'incoming') return
+
+    let audioCtx: AudioContext | null = null
+    let ringInterval: any = null
+
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+
+      const playRingChime = () => {
+        if (!audioCtx || audioCtx.state === 'closed') return
+        const osc1 = audioCtx.createOscillator()
+        const osc2 = audioCtx.createOscillator()
+        const gain = audioCtx.createGain()
+
+        osc1.type = 'sine'
+        osc2.type = 'sine'
+        osc1.frequency.setValueAtTime(440, audioCtx.currentTime)
+        osc2.frequency.setValueAtTime(480, audioCtx.currentTime)
+
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.2)
+
+        osc1.connect(gain)
+        osc2.connect(gain)
+        gain.connect(audioCtx.destination)
+
+        osc1.start()
+        osc2.start()
+        osc1.stop(audioCtx.currentTime + 1.2)
+        osc2.stop(audioCtx.currentTime + 1.2)
+      }
+
+      playRingChime()
+      ringInterval = setInterval(playRingChime, 2500)
+    } catch (e) {
+      console.warn('[CallModal] Web Audio ringtone deferred:', e)
+    }
+
+    return () => {
+      if (ringInterval) clearInterval(ringInterval)
+      if (audioCtx) {
+        try {
+          audioCtx.close()
+        } catch {}
+      }
+    }
   }, [callState.status])
 
   function formatTime(secs: number) {
@@ -222,6 +328,7 @@ export function CallModal() {
               <div className="calling-avatar-pulse">
                 {callState.target.charAt(0).toUpperCase()}
               </div>
+              <AudioEqualizerVisualizer stream={callState.remoteStreams[0]?.stream || callState.localStream} />
               <h4>{callState.status === 'calling' ? 'Calling...' : 'Connected'}</h4>
               <p>{callState.status === 'calling' ? 'Waiting for peer to accept...' : 'E2EE Stream Active'}</p>
             </div>
