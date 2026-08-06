@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import type { BridgeStatus } from '../network/bridge'
-import { bridgeClient } from '../network/bridge'
+import { bridgeClient, cleanDecodePayload } from '../network/bridge'
 import { AuthSession } from '../crypto/session'
 import {
   ChatPlusIcon,
@@ -163,18 +163,15 @@ function AppLayout() {
 
     const unsubMsg = bridgeClient.subscribeMessages((msg) => {
       if (msg.sender) {
-        const rawBlob = msg.wire_blob || msg.ciphertext || ''
-        let snippet = rawBlob
+        const rawInput = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
+        const inner = cleanDecodePayload(rawInput)
+        let snippet = rawInput
         try {
-          if (rawBlob) snippet = atob(rawBlob)
+          if (msg.wire_blob) snippet = atob(msg.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
+          else if (msg.ciphertext) snippet = atob(msg.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
         } catch {
-          snippet = rawBlob
+          snippet = rawInput
         }
-
-        let inner: any = null
-        try {
-          inner = JSON.parse(snippet)
-        } catch {}
 
         let targetName = msg.sender
 
@@ -197,6 +194,15 @@ function AppLayout() {
             targetName = inner.group_uuid || msg.sender
             snippet = inner.body || snippet
           }
+        } else if (
+          snippet.includes('call_offer') ||
+          snippet.includes('call_answer') ||
+          snippet.includes('call_ice') ||
+          snippet.includes('call_end') ||
+          snippet.includes('file_init') ||
+          snippet.includes('eyJ0eXBlIjoiY2Fsb')
+        ) {
+          return
         }
 
         const nowMs = Date.now()
@@ -246,6 +252,7 @@ function AppLayout() {
       setContacts(loadUserContacts())
     }
     window.addEventListener('vexta_messages_cleared', reloadContacts)
+    window.addEventListener('vexta_messages_updated', reloadContacts)
     window.addEventListener('vexta_contact_removed', reloadContacts)
     window.addEventListener('vexta_contact_added', reloadContacts)
     window.addEventListener('vexta_friend_request_updated', reloadContacts)
@@ -256,6 +263,7 @@ function AppLayout() {
       unsubMsg()
       unsubRequests()
       window.removeEventListener('vexta_messages_cleared', reloadContacts)
+      window.removeEventListener('vexta_messages_updated', reloadContacts)
       window.removeEventListener('vexta_contact_removed', reloadContacts)
       window.removeEventListener('vexta_contact_added', reloadContacts)
       window.removeEventListener('vexta_friend_request_updated', reloadContacts)

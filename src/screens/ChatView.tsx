@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ChatInfoView from './ChatInfoView'
-import { bridgeClient } from '../network/bridge'
+import { bridgeClient, cleanDecodePayload } from '../network/bridge'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   encryptFileChunk,
@@ -263,7 +263,22 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const pInterval = setInterval(updatePresence, 5000)
       window.addEventListener('vexta_presence_updated', updatePresence)
 
-      const dbMsgs = db.getMessages(name)
+      const dbMsgs = db.getMessages(name).filter((m) => {
+        const text = m.ciphertext || ''
+        if (
+          text.includes('call_offer') ||
+          text.includes('call_answer') ||
+          text.includes('call_ice') ||
+          text.includes('call_end') ||
+          text.includes('file_init') ||
+          text.includes('eyJ0eXBlIjoiY2Fsb') ||
+          text.includes('TeyJ0eXBl') ||
+          text.includes('8eyJ0eXBl')
+        ) {
+          return false
+        }
+        return true
+      })
       const formatted: Message[] = dbMsgs.map((m, idx) => ({
         id: idx + 1,
         text: m.ciphertext,
@@ -288,19 +303,17 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   useEffect(() => {
     const unsubscribe = bridgeClient.subscribeMessages((msg) => {
       const activeUser = localStorage.getItem('vexta_active_user') || ''
-      let text = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
-      try {
-        if (msg.wire_blob) text = atob(msg.wire_blob)
-        else if (msg.ciphertext) text = atob(msg.ciphertext)
-        else if ((msg as any).body) text = atob((msg as any).body)
-      } catch {
-        text = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
-      }
+      const rawInput = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
+      const inner = cleanDecodePayload(rawInput)
 
-      let inner: any = null
+      let text = rawInput
       try {
-        inner = JSON.parse(text)
-      } catch {}
+        if (msg.wire_blob) text = atob(msg.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
+        else if (msg.ciphertext) text = atob(msg.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
+        else if ((msg as any).body) text = atob((msg as any).body.replace(/[^A-Za-z0-9+/=]/g, ''))
+      } catch {
+        text = rawInput
+      }
 
       let msgSender = msg.sender
       let displayText = text
@@ -323,6 +336,15 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         ) {
           return
         }
+      } else if (
+        text.includes('call_offer') ||
+        text.includes('call_answer') ||
+        text.includes('call_ice') ||
+        text.includes('call_end') ||
+        text.includes('file_init') ||
+        text.includes('eyJ0eXBlIjoiY2Fsb')
+      ) {
+        return
       }
 
       const matchesTarget =
@@ -507,6 +529,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     setAttachment(null)
     setSelectedFileObj(null)
     setReplyingTo(null)
+    window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
 
     const field = fieldRef.current
     if (field) {
@@ -567,6 +590,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     ])
 
     setRecording(false)
+    window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
   }
 
   function autoGrow(el: HTMLTextAreaElement) {
