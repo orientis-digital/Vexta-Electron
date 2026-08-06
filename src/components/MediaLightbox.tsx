@@ -63,6 +63,25 @@ export function MediaLightbox({ items, initialIndex = 0, onClose }: Props) {
     }
   }
 
+  const [resolvedSrc, setResolvedSrc] = useState<string>('')
+
+  useEffect(() => {
+    if (current?.url) {
+      setResolvedSrc(current.url)
+    }
+  }, [current])
+
+  const handleImgError = async () => {
+    if (current?.url && (window as any).vextaNative?.readLocalFile) {
+      try {
+        const b64 = await (window as any).vextaNative.readLocalFile(current.url)
+        if (b64) setResolvedSrc(b64)
+      } catch (err) {
+        console.warn('[MediaLightbox] Failed to resolve local media b64:', err)
+      }
+    }
+  }
+
   if (!current) return null
 
   return (
@@ -137,9 +156,9 @@ export function MediaLightbox({ items, initialIndex = 0, onClose }: Props) {
           }}
         >
           {current.type === 'video' ? (
-            <video src={current.url} controls autoPlay className="lightbox-media" />
+            <video src={resolvedSrc || current.url} controls autoPlay className="lightbox-media" onError={handleImgError} />
           ) : (
-            <img src={current.url} alt={current.filename} className="lightbox-media" />
+            <img src={resolvedSrc || current.url} alt={current.filename} className="lightbox-media" onError={handleImgError} />
           )}
         </div>
 

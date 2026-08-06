@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ChatInfoView from './ChatInfoView'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
+import { webrtcManager } from '../network/webrtc'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   encryptFileChunk,
@@ -15,14 +16,22 @@ import {
   CheckIcon,
   CloseIcon,
   DownloadIcon,
+  FlameIcon,
+  HeartIcon,
   ImageIcon,
   InfoIcon,
   LocationIcon,
   MicIcon,
   PeopleIcon,
+  PhoneOffIcon,
+  PinIcon,
+  ReplyIcon,
   SearchIcon,
   SendIcon,
   ShieldIcon,
+  SmileIcon,
+  ThreeDotsIcon,
+  ThumbsUpIcon,
   TimerIcon,
   VideoIcon,
 } from '../components/icons'
@@ -31,7 +40,6 @@ import { VoiceRecorder } from '../components/VoiceRecorder'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { MediaLightbox } from '../components/MediaLightbox'
 import type { LightboxItem } from '../components/MediaLightbox'
-import { webrtcManager } from '../network/webrtc'
 
 import { formatLastActive } from '../network/presence'
 
@@ -214,6 +222,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<number | null>(null)
+  const [activeMoreMenuMsgId, setActiveMoreMenuMsgId] = useState<number | null>(null)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [chatTheme, setChatTheme] = useState<string>('cyber_neon')
 
@@ -281,16 +290,20 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         }
         return true
       })
-      const formatted: Message[] = dbMsgs.map((m, idx) => ({
-        id: idx + 1,
-        text: m.ciphertext,
-        timestamp: formatDisplayTime(m.timestamp),
-        rawDate: m.timestamp,
-        me: m.sender === activeUser,
-        sender: m.sender,
-        voiceUrl: m.voiceUrl,
-        attachment: m.attachment,
-      }))
+      const formatted: Message[] = dbMsgs.map((m, idx) => {
+        const isMediaOnly = Boolean(m.voiceUrl || m.attachment)
+        const isAutoLabel = m.ciphertext === m.attachment?.name || (m.ciphertext && m.ciphertext.startsWith('🎤 Voice note'))
+        return {
+          id: idx + 1,
+          text: (isMediaOnly && isAutoLabel) ? undefined : m.ciphertext,
+          timestamp: formatDisplayTime(m.timestamp),
+          rawDate: m.timestamp,
+          me: m.sender === activeUser,
+          sender: m.sender,
+          voiceUrl: m.voiceUrl,
+          attachment: m.attachment,
+        }
+      })
       setMessages(formatted)
 
       return () => {
@@ -500,6 +513,8 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           timestamp: new Date().toISOString(),
           is_read: 1,
           timer: timer || undefined,
+          voiceUrl: attachment && attachment.url && attachment.kind === 'audio' ? attachment.url : undefined,
+          attachment: attachment || undefined,
         })
       } catch (e) {
         console.warn('[Vexta DB] Error saving outbound message:', e)
@@ -655,14 +670,17 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     const items: LightboxItem[] = []
     let initialIdx = 0
 
+    const isImageFile = (name: string) => /\.(jpg|jpeg|png|gif|webp|svg|bmp|heic|avif)$/i.test(name)
+    const isVideoFile = (name: string) => /\.(mp4|webm|mkv|mov|avi)$/i.test(name)
+
     messages.forEach((m) => {
-      if (m.attachment && (m.attachment.kind === 'photo' || m.attachment.kind === 'video')) {
+      if (m.attachment && (m.attachment.kind === 'photo' || m.attachment.kind === 'video' || isImageFile(m.attachment.name) || isVideoFile(m.attachment.name))) {
         const isTarget = m.id === currentMsg.id
         if (isTarget) initialIdx = items.length
         items.push({
           url: m.attachment.url || '',
           filename: m.attachment.name,
-          type: m.attachment.kind === 'photo' ? 'image' : 'video',
+          type: (m.attachment.kind === 'photo' || isImageFile(m.attachment.name)) ? 'image' : 'video',
         })
       }
     })
@@ -864,45 +882,111 @@ function ChatView({ showInfo = false }: ChatViewProps) {
               ) : (
                 <div
                   className={`msg-row ${m.me ? 'me' : 'them'}`}
-                  onMouseLeave={() => setActiveReactionMsgId(null)}
+                  onMouseLeave={() => {
+                    setActiveReactionMsgId(null)
+                    setActiveMoreMenuMsgId(null)
+                  }}
                 >
                   {!m.me && isGroup(chatId) && (
                     <span className="sender-label">{m.sender || 'Peer'}</span>
                   )}
 
-                  <div className="bubble-wrapper">
-                    {/* Hover Quick-Action Bar */}
-                    <div className="bubble-hover-actions">
+                  {/* Outbound (me) Messenger Action Bar: left side of bubble */}
+                  {m.me && (
+                    <div className={`messenger-hover-actions ${activeMoreMenuMsgId === m.id || activeReactionMsgId === m.id ? 'active' : ''}`}>
+                      <div className="messenger-action-wrap">
+                        <button
+                          type="button"
+                          className="messenger-action-btn"
+                          title="More options"
+                          onClick={() => setActiveMoreMenuMsgId(activeMoreMenuMsgId === m.id ? null : m.id)}
+                        >
+                          <ThreeDotsIcon size={18} />
+                        </button>
+
+                        {activeMoreMenuMsgId === m.id && (
+                          <div className="messenger-popover-menu left">
+                            {m.text && (
+                              <button
+                                type="button"
+                                className="messenger-popover-item"
+                                onClick={() => {
+                                  handlePinMessage(m)
+                                  setActiveMoreMenuMsgId(null)
+                                }}
+                              >
+                                <PinIcon size={15} />
+                                <span>Pin</span>
+                              </button>
+                            )}
+                            {m.text && (
+                              <button
+                                type="button"
+                                className="messenger-popover-item"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(m.text)
+                                  setActiveMoreMenuMsgId(null)
+                                }}
+                              >
+                                <CheckIcon size={15} />
+                                <span>Copy</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="messenger-popover-item danger"
+                              onClick={() => {
+                                setMessages((prev) => prev.filter((item) => item.id !== m.id))
+                                const activeUser = localStorage.getItem('vexta_active_user') || ''
+                                if (activeUser) {
+                                  new VextaDatabaseManager(activeUser).deleteMessage(m.id)
+                                }
+                                setActiveMoreMenuMsgId(null)
+                              }}
+                            >
+                              <CloseIcon size={15} />
+                              <span>Unsend / Delete</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {(m.voiceUrl || m.attachment?.url || m.attachment) && (
+                        <button
+                          type="button"
+                          className="messenger-action-btn"
+                          title="Save to Downloads/Vexta"
+                          onClick={() => {
+                            const targetUrl = m.voiceUrl || m.attachment?.url || ''
+                            const targetName = m.attachment?.name || `voice_${Date.now()}.webm`
+                            if (targetUrl) saveMediaToDownloads(targetUrl, targetName)
+                          }}
+                        >
+                          <DownloadIcon size={18} />
+                        </button>
+                      )}
+
                       <button
                         type="button"
-                        className="action-pill-btn"
+                        className="messenger-action-btn"
                         title="Reply"
                         onClick={() => setReplyingTo(m)}
                       >
-                        ↩️
+                        <ReplyIcon size={18} />
                       </button>
+
                       <button
                         type="button"
-                        className="action-pill-btn"
-                        title="Copy text"
-                        onClick={() => {
-                          if (m.text) navigator.clipboard.writeText(m.text)
-                        }}
+                        className="messenger-action-btn"
+                        title="React"
+                        onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
                       >
-                        📋
+                        <SmileIcon size={18} />
                       </button>
-                      {m.text && (
-                        <button
-                          type="button"
-                          className="action-pill-btn"
-                          title="Pin Message"
-                          onClick={() => handlePinMessage(m)}
-                        >
-                          📌
-                        </button>
-                      )}
                     </div>
+                  )}
 
+                  <div className="bubble-wrapper">
                     <div className={`bubble ${m.me ? 'me' : 'them'}`}>
                       {/* Emoji Reaction Picker Popover */}
                       {activeReactionMsgId === m.id && (
@@ -928,28 +1012,29 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                         </div>
                       )}
 
-                      {/* Voice Note Audio Player */}
-                      {m.voiceUrl ? (
-                        <div className="voice-player-wrap">
-                          <AudioPlayer src={m.voiceUrl} />
+                      {/* Call Ended Event Card */}
+                      {m.text && m.text.startsWith('CALL_EVENT:') ? (
+                        <div className="call-ended-card">
+                          <div className="call-ended-icon">
+                            <PhoneOffIcon size={18} />
+                          </div>
+                          <div className="call-ended-meta">
+                            <span className="call-ended-title">
+                              {m.text.replace('CALL_EVENT:', '') || 'Call Ended'}
+                            </span>
+                            <span className="call-ended-sub">End-to-End Encrypted</span>
+                          </div>
                           <button
                             type="button"
-                            className="btn-download-media"
-                            title="Save to Downloads/Vexta"
-                            onClick={async (e) => {
-                              e.stopPropagation()
-                              try {
-                                const res = await fetch(m.voiceUrl!)
-                                const blob = await res.blob()
-                                await saveMediaToDownloads(blob, `voice_${Date.now()}.webm`)
-                              } catch (err) {
-                                console.warn('[Vexta Download Error]', err)
-                              }
-                            }}
+                            className="btn-call-back"
+                            title="Call back"
+                            onClick={() => webrtcManager.startCall(name, isGroup(chatId))}
                           >
-                            <DownloadIcon size={14} />
+                            Call Back
                           </button>
                         </div>
+                      ) : m.voiceUrl ? (
+                        <AudioPlayer src={m.voiceUrl} />
                       ) : (
                         <>
                           {/* Attachments */}
@@ -965,23 +1050,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                                     alt={m.attachment.name}
                                     className="chat-img-thumb"
                                   />
-                                  <button
-                                    type="button"
-                                    className="btn-download-thumb"
-                                    title="Save to Downloads/Vexta"
-                                    onClick={async (e) => {
-                                      e.stopPropagation()
-                                      try {
-                                        const res = await fetch(m.attachment!.url!)
-                                        const blob = await res.blob()
-                                        await saveMediaToDownloads(blob, m.attachment!.name)
-                                      } catch (err) {
-                                        console.warn('[Vexta Download Error]', err)
-                                      }
-                                    }}
-                                  >
-                                    <DownloadIcon size={14} />
-                                  </button>
                                 </div>
                               ) : (
                                 <>
@@ -992,25 +1060,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                                       {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
                                     </small>
                                   </span>
-                                  {m.attachment.url && (
-                                    <button
-                                      type="button"
-                                      className="btn-download-doc"
-                                      title="Save to Downloads/Vexta"
-                                      onClick={async (e) => {
-                                        e.stopPropagation()
-                                        try {
-                                          const res = await fetch(m.attachment!.url!)
-                                          const blob = await res.blob()
-                                          await saveMediaToDownloads(blob, m.attachment!.name)
-                                        } catch (err) {
-                                          console.warn('[Vexta Download Error]', err)
-                                        }
-                                      }}
-                                    >
-                                      <DownloadIcon size={14} />
-                                    </button>
-                                  )}
                                 </>
                               )}
                             </div>
@@ -1043,6 +1092,101 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                       )}
                     </div>
                   </div>
+
+                  {/* Inbound (them) Messenger Action Bar: right side of bubble */}
+                  {!m.me && (
+                    <div className={`messenger-hover-actions ${activeMoreMenuMsgId === m.id || activeReactionMsgId === m.id ? 'active' : ''}`}>
+                      <button
+                        type="button"
+                        className="messenger-action-btn"
+                        title="React"
+                        onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
+                      >
+                        <SmileIcon size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        className="messenger-action-btn"
+                        title="Reply"
+                        onClick={() => setReplyingTo(m)}
+                      >
+                        <ReplyIcon size={18} />
+                      </button>
+
+                      {(m.voiceUrl || m.attachment?.url || m.attachment) && (
+                        <button
+                          type="button"
+                          className="messenger-action-btn"
+                          title="Save to Downloads/Vexta"
+                          onClick={() => {
+                            const targetUrl = m.voiceUrl || m.attachment?.url || ''
+                            const targetName = m.attachment?.name || `voice_${Date.now()}.webm`
+                            if (targetUrl) saveMediaToDownloads(targetUrl, targetName)
+                          }}
+                        >
+                          <DownloadIcon size={18} />
+                        </button>
+                      )}
+
+                      <div className="messenger-action-wrap">
+                        <button
+                          type="button"
+                          className="messenger-action-btn"
+                          title="More options"
+                          onClick={() => setActiveMoreMenuMsgId(activeMoreMenuMsgId === m.id ? null : m.id)}
+                        >
+                          <ThreeDotsIcon size={18} />
+                        </button>
+
+                        {activeMoreMenuMsgId === m.id && (
+                          <div className="messenger-popover-menu right">
+                            {m.text && (
+                              <button
+                                type="button"
+                                className="messenger-popover-item"
+                                onClick={() => {
+                                  handlePinMessage(m)
+                                  setActiveMoreMenuMsgId(null)
+                                }}
+                              >
+                                <PinIcon size={15} />
+                                <span>Pin</span>
+                              </button>
+                            )}
+                            {m.text && (
+                              <button
+                                type="button"
+                                className="messenger-popover-item"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(m.text)
+                                  setActiveMoreMenuMsgId(null)
+                                }}
+                              >
+                                <CheckIcon size={15} />
+                                <span>Copy</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="messenger-popover-item danger"
+                              onClick={() => {
+                                setMessages((prev) => prev.filter((item) => item.id !== m.id))
+                                const activeUser = localStorage.getItem('vexta_active_user') || ''
+                                if (activeUser) {
+                                  new VextaDatabaseManager(activeUser).deleteMessage(m.id)
+                                }
+                                setActiveMoreMenuMsgId(null)
+                              }}
+                            >
+                              <CloseIcon size={15} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

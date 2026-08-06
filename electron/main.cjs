@@ -74,6 +74,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
@@ -196,6 +197,26 @@ function generateObfuscatedFilename(originalName = 'photo.jpg') {
 }
 
 // IPC Handlers
+ipcMain.handle('read-local-file-b64', async (_event, filePath) => {
+  try {
+    const cleanPath = filePath.replace(/^file:\/\//, '')
+    if (fs.existsSync(cleanPath)) {
+      const buf = fs.readFileSync(cleanPath)
+      const ext = path.extname(cleanPath).toLowerCase().replace('.', '')
+      let mime = 'image/png'
+      if (['jpg', 'jpeg'].includes(ext)) mime = 'image/jpeg'
+      else if (ext === 'webp') mime = 'image/webp'
+      else if (ext === 'gif') mime = 'image/gif'
+      else if (ext === 'webm') mime = 'video/webm'
+      else if (ext === 'mp4') mime = 'video/mp4'
+      return `data:${mime};base64,${buf.toString('base64')}`
+    }
+    return null
+  } catch (err) {
+    return null
+  }
+})
+
 ipcMain.handle('save-cache-media', async (_event, { arrayBuffer, originalName }) => {
   try {
     const cacheDir = path.join(app.getPath('userData'), '.cache', 'media')
@@ -215,7 +236,7 @@ ipcMain.handle('save-cache-media', async (_event, { arrayBuffer, originalName })
   }
 })
 
-ipcMain.handle('save-to-downloads', async (_event, { arrayBuffer, filename }) => {
+ipcMain.handle('save-to-downloads', async (_event, { arrayBuffer, filePath: srcPath, filename }) => {
   try {
     const downloadsDir = path.join(app.getPath('downloads'), 'Vexta')
     if (!fs.existsSync(downloadsDir)) {
@@ -223,11 +244,25 @@ ipcMain.handle('save-to-downloads', async (_event, { arrayBuffer, filename }) =>
     }
 
     const safeName = path.basename(filename || 'download')
-    const filePath = path.join(downloadsDir, safeName)
-    const buffer = Buffer.from(arrayBuffer)
+    const destPath = path.join(downloadsDir, safeName)
 
-    fs.writeFileSync(filePath, buffer)
-    return { success: true, filePath }
+    if (srcPath) {
+      const cleanSrcPath = srcPath.replace(/^file:\/\//, '')
+      if (fs.existsSync(cleanSrcPath)) {
+        fs.copyFileSync(cleanSrcPath, destPath)
+        console.log(`[Electron IPC] Copied file ${cleanSrcPath} -> ${destPath}`)
+        return { success: true, filePath: destPath }
+      }
+    }
+
+    if (arrayBuffer) {
+      const buffer = Buffer.from(arrayBuffer)
+      fs.writeFileSync(destPath, buffer)
+      console.log(`[Electron IPC] Saved buffer -> ${destPath}`)
+      return { success: true, filePath: destPath }
+    }
+
+    return { success: false, error: 'No data source provided' }
   } catch (err) {
     console.error('[Electron IPC] Error saving to Downloads/Vexta:', err)
     return { success: false, error: String(err) }
