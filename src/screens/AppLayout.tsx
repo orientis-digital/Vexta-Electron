@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { BridgeStatus } from '../network/bridge'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
 import { AuthSession } from '../crypto/session'

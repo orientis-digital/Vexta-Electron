@@ -55,6 +55,24 @@ class WebRTCManager {
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private pendingIceCandidates: Map<string, any[]> = new Map()
   private listeners: Set<(state: WebRTCState) => void> = new Set()
+  private callTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+
+  private startCallTimeout() {
+    this.clearCallTimeout()
+    this.callTimeoutTimer = setTimeout(() => {
+      if (this.state.status === 'calling' || this.state.status === 'incoming') {
+        console.warn('[WebRTC] 30-second ring timeout reached. Terminating call...')
+        this.endCall()
+      }
+    }, 30000)
+  }
+
+  private clearCallTimeout() {
+    if (this.callTimeoutTimer) {
+      clearTimeout(this.callTimeoutTimer)
+      this.callTimeoutTimer = null
+    }
+  }
 
   constructor() {
     // Register signaling listeners with Bridge
