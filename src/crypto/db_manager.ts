@@ -310,6 +310,13 @@ export class VextaDatabaseManager {
     localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
   }
 
+  deleteMessage(msgId: number) {
+    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const all: DbMessage[] = data ? JSON.parse(data) : []
+    const filtered = all.filter((m) => m.id !== msgId)
+    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
+  }
+
   clearMessages(chatId: string) {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []

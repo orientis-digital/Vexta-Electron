@@ -5,6 +5,7 @@
  */
 
 import { bridgeClient, cleanDecodePayload } from './bridge'
+import { VextaDatabaseManager } from '../crypto/db_manager'
 
 export type CallStatus = 'idle' | 'incoming' | 'calling' | 'active' | 'ended'
 
