@@ -600,7 +600,10 @@ function SettingsView() {
                   className="settings-select"
                   value={autoLock}
                   onChange={(e) => {
-                    setAutoLock(e.target.value)
+                    const val = e.target.value
+                    setAutoLock(val)
+                    localStorage.setItem('vx_setting_autolock', val)
+                    window.dispatchEvent(new CustomEvent('vexta_setting_autolock_updated', { detail: { value: val } }))
                     showToast('Auto-lock timeout updated')
                   }}
                 >

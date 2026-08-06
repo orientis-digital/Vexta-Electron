@@ -153,6 +153,50 @@ function AppLayout() {
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0)
 
   useEffect(() => {
+    let lastActivity = Date.now()
+
+    const updateActivity = () => {
+      lastActivity = Date.now()
+    }
+
+    window.addEventListener('mousemove', updateActivity)
+    window.addEventListener('keydown', updateActivity)
+    window.addEventListener('mousedown', updateActivity)
+    window.addEventListener('touchstart', updateActivity)
+    window.addEventListener('scroll', updateActivity)
+
+    const checkAutoLock = () => {
+      const setting = localStorage.getItem('vx_setting_autolock') || '5m'
+      if (setting === 'never') return
+
+      let timeoutMs = 5 * 60 * 1000
+      if (setting === '1m') timeoutMs = 1 * 60 * 1000
+      else if (setting === '5m') timeoutMs = 5 * 60 * 1000
+      else if (setting === '15m') timeoutMs = 15 * 60 * 1000
+      else if (setting === '1h') timeoutMs = 60 * 60 * 1000
+
+      const elapsed = Date.now() - lastActivity
+      if (elapsed >= timeoutMs) {
+        console.warn(`[Vexta Auto-Lock] Vault auto-locked after ${setting} of inactivity.`)
+        AuthSession.logout()
+        ;(window as any).vextaNative?.lockVault()
+        navigate('/login', { replace: true })
+      }
+    }
+
+    const timer = setInterval(checkAutoLock, 5000)
+
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('mousemove', updateActivity)
+      window.removeEventListener('keydown', updateActivity)
+      window.removeEventListener('mousedown', updateActivity)
+      window.removeEventListener('touchstart', updateActivity)
+      window.removeEventListener('scroll', updateActivity)
+    }
+  }, [navigate])
+
+  useEffect(() => {
     const parts = location.pathname.split('/')
     const currentChat = decodeURIComponent(parts[parts.length - 1] || '')
     if (currentChat) {
@@ -220,6 +264,17 @@ function AppLayout() {
         }
 
         const nowMs = Date.now()
+        const activeUser = localStorage.getItem('vexta_active_user') || ''
+        if (msg.sender && msg.sender !== activeUser) {
+          const isInactive = document.hidden || !document.hasFocus()
+          if (isInactive) {
+            ;(window as any).vextaNative?.showNotification({
+              title: msg.sender,
+              body: snippet.length > 50 ? snippet.slice(0, 50) + '...' : snippet,
+            })
+          }
+        }
+
         setUnreadCounts((prev) => ({
           ...prev,
           [msg.sender]: (prev[msg.sender] || 0) + 1,
