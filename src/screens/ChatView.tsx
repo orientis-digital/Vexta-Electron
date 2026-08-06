@@ -6,6 +6,7 @@ import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   encryptFileChunk,
   generateFileKey,
+  saveMediaToDownloads,
   sliceFile,
   stripFileMetadata,
 } from '../crypto/file_transfer'
@@ -13,6 +14,7 @@ import {
   AttachIcon,
   CheckIcon,
   CloseIcon,
+  DownloadIcon,
   ImageIcon,
   InfoIcon,
   LocationIcon,
@@ -928,7 +930,26 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
                       {/* Voice Note Audio Player */}
                       {m.voiceUrl ? (
-                        <AudioPlayer src={m.voiceUrl} />
+                        <div className="voice-player-wrap">
+                          <AudioPlayer src={m.voiceUrl} />
+                          <button
+                            type="button"
+                            className="btn-download-media"
+                            title="Save to Downloads/Vexta"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              try {
+                                const res = await fetch(m.voiceUrl!)
+                                const blob = await res.blob()
+                                await saveMediaToDownloads(blob, `voice_${Date.now()}.webm`)
+                              } catch (err) {
+                                console.warn('[Vexta Download Error]', err)
+                              }
+                            }}
+                          >
+                            <DownloadIcon size={14} />
+                          </button>
+                        </div>
                       ) : (
                         <>
                           {/* Attachments */}
@@ -938,11 +959,30 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                               onClick={() => m.attachment?.url && openMediaLightbox(m)}
                             >
                               {m.attachment.url && m.attachment.kind === 'photo' ? (
-                                <img
-                                  src={m.attachment.url}
-                                  alt={m.attachment.name}
-                                  className="chat-img-thumb"
-                                />
+                                <div className="photo-thumb-container">
+                                  <img
+                                    src={m.attachment.url}
+                                    alt={m.attachment.name}
+                                    className="chat-img-thumb"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn-download-thumb"
+                                    title="Save to Downloads/Vexta"
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        const res = await fetch(m.attachment!.url!)
+                                        const blob = await res.blob()
+                                        await saveMediaToDownloads(blob, m.attachment!.name)
+                                      } catch (err) {
+                                        console.warn('[Vexta Download Error]', err)
+                                      }
+                                    }}
+                                  >
+                                    <DownloadIcon size={14} />
+                                  </button>
+                                </div>
                               ) : (
                                 <>
                                   <span className="file-icon">{attachmentIcon(m.attachment)}</span>
@@ -952,6 +992,25 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                                       {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
                                     </small>
                                   </span>
+                                  {m.attachment.url && (
+                                    <button
+                                      type="button"
+                                      className="btn-download-doc"
+                                      title="Save to Downloads/Vexta"
+                                      onClick={async (e) => {
+                                        e.stopPropagation()
+                                        try {
+                                          const res = await fetch(m.attachment!.url!)
+                                          const blob = await res.blob()
+                                          await saveMediaToDownloads(blob, m.attachment!.name)
+                                        } catch (err) {
+                                          console.warn('[Vexta Download Error]', err)
+                                        }
+                                      }}
+                                    >
+                                      <DownloadIcon size={14} />
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
