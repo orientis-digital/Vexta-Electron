@@ -881,30 +881,73 @@ export class VextaBridgeClient {
         decryptedChunks.push(chunk)
       }
 
-      const mimeType = transfer.filename.match(/\.(jpe?g)$/i)
-        ? 'image/jpeg'
-        : transfer.filename.match(/\.png$/i)
-          ? 'image/png'
-          : transfer.filename.match(/\.gif$/i)
-            ? 'image/gif'
-            : transfer.filename.match(/\.webp$/i)
-              ? 'image/webp'
-              : 'application/octet-stream'
+      const ext = (transfer.filename.split('.').pop() || '').toLowerCase()
+      let mimeType = 'application/octet-stream'
+
+      if (['jpg', 'jpeg'].includes(ext)) mimeType = 'image/jpeg'
+      else if (ext === 'png') mimeType = 'image/png'
+      else if (ext === 'gif') mimeType = 'image/gif'
+      else if (ext === 'webp') mimeType = 'image/webp'
+      else if (ext === 'webm') mimeType = transfer.filename.startsWith('voice_') ? 'audio/webm' : 'video/webm'
+      else if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) mimeType = `audio/${ext}`
+      else if (['mp4', 'mov', 'mkv'].includes(ext)) mimeType = `video/${ext}`
+      else if (ext === 'pdf') mimeType = 'application/pdf'
 
       const blobParts: BlobPart[] = decryptedChunks.map(
         (c) => c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength) as ArrayBuffer,
       )
       const blob = new Blob(blobParts, { type: mimeType })
-      const { cachedFilename, cachedPath } = await cacheReceivedMedia(blob, transfer.filename)
+      const { cachedFilename, cachedPath, cachedUrl } = await cacheReceivedMedia(blob, transfer.filename)
+
+      const finalPath = cachedPath ? `file://${cachedPath}` : cachedUrl
 
       db.updateFileTransferProgress(
         transfer.transfer_id,
         transfer.total_chunks,
         'completed',
-        cachedPath,
+        finalPath,
         cachedFilename,
       )
-      console.log(`[Vexta WSS] Cached file ${transfer.filename} → ${cachedFilename}`)
+
+      // Auto-save completed transfer to receiver's database & notify React UI
+      const isVoice = transfer.filename.startsWith('voice_') || mimeType.startsWith('audio/')
+      const isPhoto = mimeType.startsWith('image/')
+      const isVideo = mimeType.startsWith('video/')
+
+      const formatSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      }
+
+      if (isVoice) {
+        db.saveMessage({
+          sender: transfer.sender,
+          recipient: transfer.recipient,
+          ciphertext: `🎤 Voice note (${formatSize(blob.size)})`,
+          timestamp: new Date().toISOString(),
+          is_read: 0,
+          voiceUrl: finalPath,
+        })
+      } else {
+        const kind = isPhoto ? 'photo' : isVideo ? 'video' : 'doc'
+        db.saveMessage({
+          sender: transfer.sender,
+          recipient: transfer.recipient,
+          ciphertext: transfer.filename,
+          timestamp: new Date().toISOString(),
+          is_read: 0,
+          attachment: {
+            kind,
+            name: transfer.filename,
+            size: formatSize(blob.size),
+            url: finalPath,
+          },
+        })
+      }
+
+      window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: transfer.sender } }))
+      console.log(`[Vexta WSS] Cached file ${transfer.filename} → ${finalPath}`)
     } catch (err) {
       console.error('[Vexta WSS] Failed to cache completed transfer:', err)
     }
