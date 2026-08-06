@@ -4,7 +4,7 @@
  * local audio/video stream capturing, screen sharing, and STUN/ICE traversal.
  */
 
-import { bridgeClient } from './bridge'
+import { bridgeClient, cleanDecodePayload } from './bridge'
 
 export type CallStatus = 'idle' | 'incoming' | 'calling' | 'active' | 'ended'
 
@@ -59,28 +59,18 @@ class WebRTCManager {
   constructor() {
     // Register signaling listeners with Bridge
     bridgeClient.subscribeMessages((msg) => {
-      let text = msg.wire_blob || msg.ciphertext || ''
-      try {
-        if (msg.wire_blob) text = atob(msg.wire_blob)
-        else if (msg.ciphertext) text = atob(msg.ciphertext)
-      } catch {}
-
-      try {
-        if (text) {
-          const payload = JSON.parse(text)
-          if (payload && typeof payload === 'object') {
-            if (payload.type === 'call_offer') {
-              this.handleInboundOffer(msg.sender, payload.sdp, payload.is_group, payload.is_video)
-            } else if (payload.type === 'call_answer') {
-              this.handleInboundAnswer(msg.sender, payload.sdp)
-            } else if (payload.type === 'call_ice') {
-              this.handleInboundIce(msg.sender, payload.candidate)
-            } else if (payload.type === 'call_end') {
-              this.handleInboundEnd(msg.sender)
-            }
-          }
+      const payload = cleanDecodePayload(msg.wire_blob || msg.ciphertext || (msg as any).body || '')
+      if (payload && typeof payload === 'object') {
+        if (payload.type === 'call_offer') {
+          this.handleInboundOffer(msg.sender, payload.sdp, payload.is_group, payload.is_video)
+        } else if (payload.type === 'call_answer') {
+          this.handleInboundAnswer(msg.sender, payload.sdp)
+        } else if (payload.type === 'call_ice') {
+          this.handleInboundIce(msg.sender, payload.candidate)
+        } else if (payload.type === 'call_end') {
+          this.handleInboundEnd(msg.sender)
         }
-      } catch {}
+      }
     })
   }
 
@@ -162,9 +152,19 @@ class WebRTCManager {
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0] || new MediaStream([event.track])
       this.addRemoteStream(recipient, remoteStream)
+      this.clearCallTimeout()
       this.state.status = 'active'
       this.notify()
     }
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[WebRTC] Peer Connection state (${recipient}):`, pc.connectionState)
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+        this.handleInboundEnd(recipient)
+      }
+    }
+
+    this.startCallTimeout()
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -185,6 +185,7 @@ class WebRTCManager {
   private handleInboundOffer(caller: string, sdp: any, isGroup = false, isVideo = false) {
     if (this.state.status !== 'idle') return
 
+    this.startCallTimeout()
     this.state = {
       status: 'incoming',
       target: caller,
@@ -217,6 +218,7 @@ class WebRTCManager {
       this.state.localStream = stream
       this.state.isVideo = useVideo
       this.state.status = 'active'
+      this.clearCallTimeout()
       this.notify()
 
       const pc = new RTCPeerConnection(RTC_CONFIG)
@@ -236,7 +238,16 @@ class WebRTCManager {
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0] || new MediaStream([event.track])
         this.addRemoteStream(caller, remoteStream)
+        this.clearCallTimeout()
+        this.state.status = 'active'
         this.notify()
+      }
+
+      pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] Peer Connection state (${caller}):`, pc.connectionState)
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+          this.handleInboundEnd(caller)
+        }
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(this.state.sdpOffer))
@@ -421,6 +432,7 @@ class WebRTCManager {
   }
 
   endCall() {
+    this.clearCallTimeout()
     const target = this.state.target || this.state.caller
     if (target) {
       bridgeClient.sendBlindMessage(

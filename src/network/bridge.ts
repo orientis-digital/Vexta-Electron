@@ -82,6 +82,35 @@ function parseBinaryMessageFrame(rawText: string, _eventData?: any): any | null 
   return null
 }
 
+export function cleanDecodePayload(input: string): any {
+  if (!input) return null
+
+  // 1. Direct JSON parse
+  try {
+    const direct = JSON.parse(input)
+    if (direct && typeof direct === 'object') return direct
+  } catch {}
+
+  // 2. Base64 payload decoding (handles MessagePack byte length prefixes e.g. TeyJ..., 8eyJ...)
+  const eyjIdx = input.indexOf('eyJ')
+  const b64Candidate = eyjIdx !== -1 ? input.slice(eyjIdx) : input
+  const cleanB64 = b64Candidate.replace(/[^A-Za-z0-9+/=]/g, '')
+
+  try {
+    const decoded = atob(cleanB64)
+    const obj = JSON.parse(decoded)
+    if (obj && typeof obj === 'object') return obj
+  } catch {}
+
+  try {
+    const decoded = atob(input.trim())
+    const obj = JSON.parse(decoded)
+    if (obj && typeof obj === 'object') return obj
+  } catch {}
+
+  return null
+}
+
 export class VextaBridgeClient {
   private url: string
   private ws: WebSocket | null = null
@@ -94,7 +123,24 @@ export class VextaBridgeClient {
   private maxDelay = 30000
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private pingTimer: ReturnType<typeof setInterval> | null = null
   private isManualDisconnect = false
+
+  private startPingHeartbeat() {
+    this.stopPingHeartbeat()
+    this.pingTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendJson({ type: 'PING', timestamp: Date.now() })
+      }
+    }, 20000)
+  }
+
+  private stopPingHeartbeat() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer)
+      this.pingTimer = null
+    }
+  }
 
   private listeners: Set<(status: BridgeStatus) => void> = new Set()
   private messageListeners: Set<(msg: BlindMessagePayload) => void> = new Set()
@@ -250,6 +296,7 @@ export class VextaBridgeClient {
 
       this.ws.onclose = (evt) => {
         console.warn(`[Vexta WSS] Connection closed (code: ${evt.code})`)
+        this.stopPingHeartbeat()
         this.ws = null
         this.setStatus('disconnected')
         if (!this.isManualDisconnect) {
@@ -276,9 +323,12 @@ export class VextaBridgeClient {
     } else if (payload.type === 'AUTH_SUCCESS') {
       console.log(`[Vexta WSS] AUTH_SUCCESS from relay!`)
       this.setStatus('connected')
+      this.startPingHeartbeat()
       this.listFriendRequests()
       this.listFriends()
       this.flushOutboundQueue()
+    } else if (payload.type === 'PONG') {
+      // Keep-alive heartbeat ack from relay server
     } else if (payload.type === 'FRIEND_REQUESTS_LIST') {
       console.log(`[Vexta WSS] Received FRIEND_REQUESTS_LIST:`, payload.requests)
       this.friendRequestsListeners.forEach((fn) => fn(payload.requests || []))
@@ -350,20 +400,16 @@ export class VextaBridgeClient {
       if (activeUser) {
         try {
           const db = new VextaDatabaseManager(activeUser)
-          let text = payload.wire_blob || payload.ciphertext || payload.body || ''
-          try {
-            if (payload.wire_blob) text = atob(payload.wire_blob)
-            else if (payload.ciphertext) text = atob(payload.ciphertext)
-            else if (payload.body) text = atob(payload.body)
-          } catch {
-            text = payload.wire_blob || payload.ciphertext || payload.body || ''
-          }
+          const rawInput = payload.wire_blob || payload.ciphertext || payload.body || ''
+          const innerPayload = cleanDecodePayload(rawInput)
 
-          let innerPayload: any = null
+          let text = rawInput
           try {
-            innerPayload = JSON.parse(text)
+            if (payload.wire_blob) text = atob(payload.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
+            else if (payload.ciphertext) text = atob(payload.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
+            else if (payload.body) text = atob(payload.body.replace(/[^A-Za-z0-9+/=]/g, ''))
           } catch {
-            innerPayload = null
+            text = rawInput
           }
 
           const parseTs = (ts: any): string => {
@@ -973,6 +1019,7 @@ export class VextaBridgeClient {
 
   disconnect() {
     this.isManualDisconnect = true
+    this.stopPingHeartbeat()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
