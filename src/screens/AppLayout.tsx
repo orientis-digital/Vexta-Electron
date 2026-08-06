@@ -141,6 +141,7 @@ const SYSTEM_CHANNEL = 'Vexta - Global Message'
 
 function AppLayout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [contacts, setContacts] = useState<Contact[]>(loadUserContacts)
   const [activeChat, setActiveChat] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -150,6 +151,19 @@ function AppLayout() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('connecting')
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0)
+
+  useEffect(() => {
+    const parts = location.pathname.split('/')
+    const currentChat = decodeURIComponent(parts[parts.length - 1] || '')
+    if (currentChat) {
+      setUnreadCounts((prev) => {
+        if (!prev[currentChat]) return prev
+        const next = { ...prev }
+        delete next[currentChat]
+        return next
+      })
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     bridgeClient.connect()
