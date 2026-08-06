@@ -6,6 +6,7 @@ import {
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbFileTransfer } from '../crypto/db_manager'
 import { cacheReceivedMedia, decryptFileChunk } from '../crypto/file_transfer'
+import { base64ToUtf8, decodePayload, encodePayload, utf8ToBase64 } from './codec'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -82,33 +83,8 @@ function parseBinaryMessageFrame(rawText: string, _eventData?: any): any | null 
   return null
 }
 
-export function cleanDecodePayload(input: string): any {
-  if (!input) return null
-
-  // 1. Direct JSON parse
-  try {
-    const direct = JSON.parse(input)
-    if (direct && typeof direct === 'object') return direct
-  } catch {}
-
-  // 2. Base64 payload decoding (handles MessagePack byte length prefixes e.g. TeyJ..., 8eyJ...)
-  const eyjIdx = input.indexOf('eyJ')
-  const b64Candidate = eyjIdx !== -1 ? input.slice(eyjIdx) : input
-  const cleanB64 = b64Candidate.replace(/[^A-Za-z0-9+/=]/g, '')
-
-  try {
-    const decoded = atob(cleanB64)
-    const obj = JSON.parse(decoded)
-    if (obj && typeof obj === 'object') return obj
-  } catch {}
-
-  try {
-    const decoded = atob(input.trim())
-    const obj = JSON.parse(decoded)
-    if (obj && typeof obj === 'object') return obj
-  } catch {}
-
-  return null
+export function cleanDecodePayload(input: string | ArrayBuffer | Uint8Array): any {
+  return decodePayload(input)
 }
 
 export class VextaBridgeClient {
@@ -247,6 +223,7 @@ export class VextaBridgeClient {
 
     try {
       this.ws = new WebSocket(this.url)
+      this.ws.binaryType = 'arraybuffer'
 
       this.ws.onopen = () => {
         console.log(`[Vexta WSS] Channel OPEN to ${this.url}`)
@@ -259,35 +236,21 @@ export class VextaBridgeClient {
 
       this.ws.onmessage = async (event) => {
         try {
-          let rawText = ''
-          if (typeof event.data === 'string') {
-            rawText = event.data
-          } else if (event.data instanceof Blob) {
-            rawText = await event.data.text()
-          } else if (event.data instanceof ArrayBuffer) {
-            rawText = new TextDecoder().decode(event.data)
-          } else {
-            rawText = String(event.data)
+          let data = event.data
+          if (data instanceof Blob) {
+            data = await data.arrayBuffer()
           }
 
-          console.log(`[Vexta WSS] Raw string content (${rawText.length} chars):`, rawText)
-
-          let payload: any = null
-          try {
-            payload = JSON.parse(rawText)
-          } catch {
-            try {
-              payload = JSON.parse(atob(rawText.trim()))
-            } catch {
-              payload = parseBinaryMessageFrame(rawText, event.data)
-            }
+          let payload = decodePayload(data)
+          if (!payload && typeof data === 'string') {
+            payload = parseBinaryMessageFrame(data, event.data)
           }
 
           if (payload) {
             console.log(`[Vexta WSS] Decoded frame:`, payload.type, 'from @' + (payload.sender || 'unknown'))
             this.handlePayload(payload)
           } else {
-            console.warn(`[Vexta WSS] Non-JSON text payload received:`, rawText)
+            console.warn(`[Vexta WSS] Unrecognized payload frame received`)
           }
         } catch (err) {
           console.warn(`[Vexta WSS] Raw frame processing exception:`, err)
@@ -730,7 +693,7 @@ export class VextaBridgeClient {
       sender: activeUser,
       body: bodyText,
     })
-    const b64Payload = btoa(innerPayload)
+    const b64Payload = utf8ToBase64(innerPayload)
 
     for (const member of members) {
       if (member !== activeUser) {
@@ -746,7 +709,7 @@ export class VextaBridgeClient {
       group_name: groupName,
       members,
     })
-    this.sendBlindMessage(recipient, btoa(innerPayload))
+    this.sendBlindMessage(recipient, utf8ToBase64(innerPayload))
   }
 
   sendFileInit(recipient: string, initPayload: {
@@ -762,7 +725,7 @@ export class VextaBridgeClient {
       type: 'file_init',
       ...initPayload,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendFileChunk(recipient: string, transferId: string, chunkIndex: number, encryptedChunkB64: string) {
@@ -772,7 +735,7 @@ export class VextaBridgeClient {
       chunk_index: chunkIndex,
       data: encryptedChunkB64,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendFileStatusQuery(recipient: string, transferId: string) {
@@ -780,7 +743,7 @@ export class VextaBridgeClient {
       type: 'file_status_query',
       transfer_id: transferId,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendFileStatusResponse(recipient: string, transferId: string, receivedChunks: number, status: string) {
@@ -790,7 +753,7 @@ export class VextaBridgeClient {
       received_chunks: receivedChunks,
       status,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendMetadataSync(
@@ -810,7 +773,7 @@ export class VextaBridgeClient {
       action,
       data,
     })
-    const wireBlob = btoa(`SYNC_META:${payload}`)
+    const wireBlob = utf8ToBase64(`SYNC_META:${payload}`)
     this.sendBlindMessage(activeUser, wireBlob)
   }
 
@@ -826,7 +789,7 @@ export class VextaBridgeClient {
       emoji,
       action,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendCallOffer(recipient: string, sdp: any, isGroup = false, isVideo = false) {
@@ -836,7 +799,7 @@ export class VextaBridgeClient {
       is_group: isGroup,
       is_video: isVideo,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendCallAnswer(recipient: string, sdp: any) {
@@ -844,7 +807,7 @@ export class VextaBridgeClient {
       type: 'call_answer',
       sdp,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendIceCandidate(recipient: string, candidate: any) {
@@ -852,14 +815,14 @@ export class VextaBridgeClient {
       type: 'call_ice',
       candidate,
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendCallEnd(recipient: string) {
     const payload = JSON.stringify({
       type: 'call_end',
     })
-    this.sendBlindMessage(recipient, btoa(payload))
+    this.sendBlindMessage(recipient, utf8ToBase64(payload))
   }
 
   sendPresence(status: 'online' | 'offline' = 'online') {
@@ -873,7 +836,7 @@ export class VextaBridgeClient {
     const contacts = new VextaDatabaseManager(activeUser).getContacts()
     contacts.forEach((c) => {
       if (c.username !== activeUser && c.username !== 'Vexta - Global Message') {
-        this.sendBlindMessage(c.username, btoa(payload))
+        this.sendBlindMessage(c.username, utf8ToBase64(payload))
       }
     })
   }
@@ -1035,7 +998,7 @@ export class VextaBridgeClient {
 
   private sendJson(obj: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(obj))
+      this.ws.send(encodePayload(obj))
     }
   }
 
