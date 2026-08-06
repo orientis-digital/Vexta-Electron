@@ -537,6 +537,9 @@ export class VextaBridgeClient {
                 timestamp: msgTimestamp,
                 is_read: 0,
               })
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: payload.sender } }))
+              }
             } else if (
               innerPayload.type === 'call_offer' ||
               innerPayload.type === 'call_answer' ||

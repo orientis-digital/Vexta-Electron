@@ -212,7 +212,7 @@ ipcMain.handle('read-local-file-b64', async (_event, filePath) => {
       return `data:${mime};base64,${buf.toString('base64')}`
     }
     return null
-  } catch (err) {
+  } catch {
     return null
   }
 })

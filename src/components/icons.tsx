@@ -507,5 +507,18 @@ export function PinIcon(props: IconProps) {
   )
 }
 
+export function OrientisLogo({ size = 22, className }: { size?: number; className?: string }) {
+  return (
+    <img
+      src="/orientis-logo.png"
+      alt="Orientis Digital"
+      width={size}
+      height={size}
+      className={className}
+      style={{ display: 'block', flexShrink: 0, objectFit: 'contain' }}
+    />
+  )
+}
+
 
 

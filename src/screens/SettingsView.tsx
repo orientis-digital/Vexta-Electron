@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
+deplodepimport {
   CopyIcon,
-  DatabaseIcon,
-  DesktopIcon,
-  DownloadIcon,
-  EyeIcon,
-  EyeOffIcon,
-  GearIcon,
-  KeyIcon,
-  LockIcon,
-  QrCodeIcon,
-  RefreshIcon,
-  ServerIcon,
-  ShieldIcon,
-  SmartphoneIcon,
-  TrashIcon,
+    DatabaseIcon,
+    DesktopIcon,
+    DownloadIcon,
+    EyeIcon,
+    EyeOffIcon,
+    GearIcon,
+    KeyIcon,
+    LockIcon,
+    OrientisLogo,
+    QrCodeIcon,
+    RefreshIcon,
+    ServerIcon,
+    ShieldIcon,
+    SmartphoneIcon,
+    TrashIcon,
 } from '../components/icons'
 
 import { bridgeClient } from '../network/bridge'
@@ -146,11 +147,11 @@ function SettingsView() {
   useEffect(() => {
     const native = (window as any).vextaNative
     if (native) {
-      native.setMinimizeToTray(minimizeToTray).catch(() => {})
-      native.setAutoLaunch(autoLaunch).catch(() => {})
-      native.setGlobalHotkeys(globalHotkeys).catch(() => {})
-      native.setNotificationPrivacy(hideNotifications).catch(() => {})
-      native.setScreenProtection(screenProtection).catch(() => {})
+      native.setMinimizeToTray(minimizeToTray).catch(() => { })
+      native.setAutoLaunch(autoLaunch).catch(() => { })
+      native.setGlobalHotkeys(globalHotkeys).catch(() => { })
+      native.setNotificationPrivacy(hideNotifications).catch(() => { })
+      native.setScreenProtection(screenProtection).catch(() => { })
     }
   }, [minimizeToTray, autoLaunch, globalHotkeys, hideNotifications, screenProtection])
 
@@ -162,7 +163,7 @@ function SettingsView() {
     if (stored.length > 0) {
       setDevices(stored)
     } else if (typeof window !== 'undefined' && (window as any).vextaNative) {
-      ;(window as any).vextaNative.getSystemInfo().then((info: any) => {
+      ; (window as any).vextaNative.getSystemInfo().then((info: any) => {
         if (info) {
           const currentDev: DbDevice = {
             id: 'dev-' + Date.now().toString(16),
@@ -175,7 +176,7 @@ function SettingsView() {
           db.saveDevice(currentDev)
           setDevices([currentDev])
         }
-      }).catch(() => {})
+      }).catch(() => { })
     }
   }, [])
 
@@ -568,7 +569,7 @@ function SettingsView() {
                   type="button"
                   className="btn-secondary"
                   onClick={() => {
-                    navigator.clipboard.writeText(recoveryCode).catch(() => {})
+                    navigator.clipboard.writeText(recoveryCode).catch(() => { })
                     showToast('Recovery code copied to clipboard')
                   }}
                 >
@@ -1149,11 +1150,20 @@ function SettingsView() {
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Runtime</span>
-                  <span className="spec-value">Electron \u00B7 React 19</span>
+                  <span className="spec-value">Electron · React 19</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Publisher</span>
                   <span className="spec-value">Orientis Digital</span>
+                </div>
+              </div>
+
+              <div className="about-developer-badge">
+                <OrientisLogo size={32} />
+                <div className="dev-meta">
+                  <span className="dev-label">Developed &amp; Maintained by</span>
+                  <h4 className="dev-name">Orientis Digital</h4>
+                  <p className="dev-desc">Zero-Knowledge Security &amp; Unified Protocol Engineering</p>
                 </div>
               </div>
 

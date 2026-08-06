@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  clearRegisteredAccounts,
   getRegisteredAccounts,
   recoverAccount,
 } from '../crypto/auth'
@@ -9,7 +8,7 @@ import { AuthSession } from '../crypto/session'
 import { bridgeClient } from '../network/bridge'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
-import { ArrowLeft, Laptop } from '../components/icons'
+import { ArrowLeft, Laptop, OrientisLogo } from '../components/icons'
 
 function SectionDivider({ label }: { label?: string }) {
   return (
@@ -180,11 +179,6 @@ function LoginScreen() {
             The bridge relays only encrypted blobs — it can never read your
             messages.
           </p>
-
-          <div className="brand-footer">
-            <span className="footer-dot" aria-hidden="true" />
-            Orientis Labs — Unified Tech Solutions
-          </div>
         </div>
 
         <div className="login-panel">
@@ -285,17 +279,6 @@ function LoginScreen() {
                   ))}
                   <option value="__custom__">+ Enter Other Username...</option>
                 </select>
-                <button
-                  type="button"
-                  className="btn-text"
-                  style={{ fontSize: '11px', marginTop: '4px', textAlign: 'left', color: '#ff6b6b' }}
-                  onClick={() => {
-                    clearRegisteredAccounts()
-                    window.location.reload()
-                  }}
-                >
-                  Clear Saved Accounts List
-                </button>
               </label>
             ) : (
               <label>
@@ -370,18 +353,6 @@ function LoginScreen() {
 
           <button
             type="button"
-            className="btn-ghost biometric-btn"
-            onClick={() => {
-              setPassword('password123')
-              setAuthError(null)
-            }}
-          >
-            <span className="biometric-glyph">{'\u{1F577}'}</span>
-            Biometric Unlock (Demo)
-          </button>
-
-          <button
-            type="button"
             className="btn-text forgot-btn"
             onClick={() => {
               setRecoveryUser(activeUsername || 'Guest')
@@ -398,11 +369,16 @@ function LoginScreen() {
               + Sign Up
             </Link>
             <Link to="/signup" className="action-btn">
-              {'\u21BB'} Restore
+              ↻ Restore
             </Link>
             <Link to="/signup" className="action-btn">
-              {'\u21C5'} Import
+              ⇅ Import
             </Link>
+          </div>
+
+          <div className="login-footer-brand">
+            <OrientisLogo size={20} />
+            <span>Developed by <b>Orientis Digital</b></span>
           </div>
         </div>
       </div>

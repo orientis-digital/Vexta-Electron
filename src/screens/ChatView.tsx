@@ -16,8 +16,6 @@ import {
   CheckIcon,
   CloseIcon,
   DownloadIcon,
-  FlameIcon,
-  HeartIcon,
   ImageIcon,
   InfoIcon,
   LocationIcon,
@@ -31,7 +29,6 @@ import {
   ShieldIcon,
   SmileIcon,
   ThreeDotsIcon,
-  ThumbsUpIcon,
   TimerIcon,
   VideoIcon,
 } from '../components/icons'
@@ -306,9 +303,49 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       })
       setMessages(formatted)
 
+      const handleMessagesUpdated = (e: any) => {
+        const detailName = e.detail?.name
+        const detailChatId = e.detail?.chatId
+        if (!detailName || detailName === name || detailName === chatId || detailChatId === chatId || detailChatId === name) {
+          const freshDbMsgs = db.getMessages(name).filter((m) => {
+            const text = m.ciphertext || ''
+            if (
+              text.includes('call_offer') ||
+              text.includes('call_answer') ||
+              text.includes('call_ice') ||
+              text.includes('file_init') ||
+              text.includes('eyJ0eXBlIjoiY2Fsb') ||
+              text.includes('TeyJ0eXBl') ||
+              text.includes('8eyJ0eXBl')
+            ) {
+              return false
+            }
+            return true
+          })
+          const freshFormatted: Message[] = freshDbMsgs.map((m, idx) => {
+            const isMediaOnly = Boolean(m.voiceUrl || m.attachment)
+            const isAutoLabel = m.ciphertext === m.attachment?.name || (m.ciphertext && m.ciphertext.startsWith('🎤 Voice note'))
+            return {
+              id: idx + 1,
+              text: (isMediaOnly && isAutoLabel) ? undefined : m.ciphertext,
+              timestamp: formatDisplayTime(m.timestamp),
+              rawDate: m.timestamp,
+              me: m.sender === activeUser,
+              sender: m.sender,
+              voiceUrl: m.voiceUrl,
+              attachment: m.attachment,
+            }
+          })
+          setMessages(freshFormatted)
+        }
+      }
+
+      window.addEventListener('vexta_messages_updated', handleMessagesUpdated)
+
       return () => {
         clearInterval(pInterval)
         window.removeEventListener('vexta_presence_updated', updatePresence)
+        window.removeEventListener('vexta_messages_updated', handleMessagesUpdated)
       }
     } else {
       setMessages([])
@@ -513,7 +550,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           timestamp: new Date().toISOString(),
           is_read: 1,
           timer: timer || undefined,
-          voiceUrl: attachment && attachment.url && attachment.kind === 'audio' ? attachment.url : undefined,
+          voiceUrl: attachment && attachment.url && (attachment.kind as string) === 'audio' ? attachment.url : undefined,
           attachment: attachment || undefined,
         })
       } catch (e) {
@@ -924,7 +961,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                                 type="button"
                                 className="messenger-popover-item"
                                 onClick={() => {
-                                  navigator.clipboard.writeText(m.text)
+                                  if (m.text) navigator.clipboard.writeText(m.text)
                                   setActiveMoreMenuMsgId(null)
                                 }}
                               >
@@ -1028,7 +1065,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                             type="button"
                             className="btn-call-back"
                             title="Call back"
-                            onClick={() => webrtcManager.startCall(name, isGroup(chatId))}
+                            onClick={() => webrtcManager.initiateCall(name, isGroup(chatId))}
                           >
                             Call Back
                           </button>
@@ -1159,7 +1196,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                                 type="button"
                                 className="messenger-popover-item"
                                 onClick={() => {
-                                  navigator.clipboard.writeText(m.text)
+                                  if (m.text) navigator.clipboard.writeText(m.text)
                                   setActiveMoreMenuMsgId(null)
                                 }}
                               >
