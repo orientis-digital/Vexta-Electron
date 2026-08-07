@@ -82,7 +82,7 @@ function FriendsView() {
           id: c.username,
           name: c.username,
           handle: `@${c.username.toLowerCase()}`,
-          direction: 'outgoing',
+          direction: c.direction === 'incoming' ? 'incoming' : 'outgoing',
           time: 'Pending',
         }))
       setPendingRequests(pendingContacts)

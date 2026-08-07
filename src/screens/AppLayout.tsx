@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { BridgeStatus } from '../network/bridge'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
@@ -8,6 +8,7 @@ import {
   ChatPlusIcon,
   CheckIcon,
   ChevronIcon,
+  CloseIcon,
   GearIcon,
   GroupIcon,
   LogoutIcon,
@@ -138,7 +139,54 @@ function chatIdOf(c: Contact) {
   return c.group ? `group_${c.name}` : c.name
 }
 
-const SYSTEM_CHANNEL = 'Vexta - Global Message'
+function playNotificationSound() {
+  try {
+    const isSoundEnabled = localStorage.getItem('vx_setting_notification_sounds') !== 'false'
+    if (!isSoundEnabled) return
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioContextClass) return
+    const ctx = new AudioContextClass()
+
+    const osc = ctx.createOscillator()
+    const gainNode = ctx.createGain()
+
+    osc.connect(gainNode)
+    gainNode.connect(ctx.destination)
+
+    const now = ctx.currentTime
+
+    // Pleasant high-quality double chime
+    osc.type = 'sine'
+
+    // First chime
+    osc.frequency.setValueAtTime(523.25, now) // C5
+    gainNode.gain.setValueAtTime(0, now)
+    gainNode.gain.linearRampToValueAtTime(0.1, now + 0.01)
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+
+    // Second chime
+    const osc2 = ctx.createOscillator()
+    const gainNode2 = ctx.createGain()
+    osc2.connect(gainNode2)
+    gainNode2.connect(ctx.destination)
+
+    osc2.type = 'sine'
+    osc2.frequency.setValueAtTime(783.99, now + 0.08) // G5
+
+    gainNode2.gain.setValueAtTime(0, now + 0.08)
+    gainNode2.gain.linearRampToValueAtTime(0.1, now + 0.09)
+    gainNode2.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
+
+    osc.start(now)
+    osc.stop(now + 0.15)
+
+    osc2.start(now + 0.08)
+    osc2.stop(now + 0.3)
+  } catch (err) {
+    console.warn('[Vexta Audio] Failed to play notification sound:', err)
+  }
+}
 
 function AppLayout() {
   const navigate = useNavigate()
@@ -152,6 +200,16 @@ function AppLayout() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('connecting')
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0)
+
+  // In-app floating message notification banner state
+  const [notification, setNotification] = useState<{ sender: string; snippet: string } | null>(null)
+  const notificationTimeoutRef = useRef<any>(null)
+
+  // Keep a ref of activeChat to avoid stale closures in subscribeMessages
+  const activeChatRef = useRef<string | null>(null)
+  useEffect(() => {
+    activeChatRef.current = activeChat
+  }, [activeChat])
 
   useEffect(() => {
     let lastActivity = Date.now()
@@ -267,12 +325,22 @@ function AppLayout() {
         const nowMs = Date.now()
         const activeUser = localStorage.getItem('vexta_active_user') || ''
         if (msg.sender && msg.sender !== activeUser) {
+          playNotificationSound()
+
           const isInactive = document.hidden || !document.hasFocus()
           if (isInactive) {
             ;(window as any).vextaNative?.showNotification({
               title: msg.sender,
               body: snippet.length > 50 ? snippet.slice(0, 50) + '...' : snippet,
             })
+          } else if (activeChatRef.current !== targetName && activeChatRef.current !== msg.sender) {
+            if (notificationTimeoutRef.current) {
+              clearTimeout(notificationTimeoutRef.current)
+            }
+            setNotification({ sender: msg.sender, snippet })
+            notificationTimeoutRef.current = setTimeout(() => {
+              setNotification(null)
+            }, 4000)
           }
         }
 
@@ -712,6 +780,33 @@ function AppLayout() {
               </button>
             </div>
           </div>
+        </div>
+      {/* In-App Floating Message Notification Banner */}
+      {notification && (
+        <div
+          className="in-app-notification"
+          onClick={() => {
+            setNotification(null)
+            navigate(`/chat/${encodeURIComponent(notification.sender)}`)
+          }}
+        >
+          <div className="notif-avatar" style={avatarStyle(notification.sender)}>
+            {notification.sender.charAt(0).toUpperCase()}
+          </div>
+          <div className="notif-content">
+            <span className="notif-sender">{notification.sender}</span>
+            <span className="notif-snippet">{notification.snippet}</span>
+          </div>
+          <button
+            type="button"
+            className="notif-close"
+            onClick={(e) => {
+              e.stopPropagation()
+              setNotification(null)
+            }}
+          >
+            <CloseIcon size={14} />
+          </button>
         </div>
       )}
 

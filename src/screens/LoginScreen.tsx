@@ -6,6 +6,7 @@ import {
 } from '../crypto/auth'
 import { AuthSession } from '../crypto/session'
 import { bridgeClient } from '../network/bridge'
+import { base64ToUtf8 } from '../network/codec'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
 import { ArrowLeft, Laptop, OrientisLogo } from '../components/icons'
@@ -52,7 +53,7 @@ function LoginScreen() {
     const unsubApproved = bridgeClient.subscribeDeviceApproved((payload) => {
       if (payload.encryptedKeyBundle) {
         try {
-          const decodedAccounts = atob(payload.encryptedKeyBundle)
+          const decodedAccounts = base64ToUtf8(payload.encryptedKeyBundle)
           localStorage.setItem('vexta_registered_accounts', decodedAccounts)
         } catch (err) {
           console.warn('[LoginScreen] Error restoring key bundle:', err)
@@ -61,7 +62,7 @@ function LoginScreen() {
       if (payload.encryptedFriendRoster && pendingUsername) {
         try {
           const db = new VextaDatabaseManager(pendingUsername)
-          const contacts = JSON.parse(atob(payload.encryptedFriendRoster))
+          const contacts = JSON.parse(base64ToUtf8(payload.encryptedFriendRoster))
           contacts.forEach((c: any) => db.addContact(c))
         } catch (err) {
           console.warn('[LoginScreen] Error restoring roster:', err)
