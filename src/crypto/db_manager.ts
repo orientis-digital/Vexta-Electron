@@ -26,6 +26,7 @@ export type DbContact = {
   display_name?: string
   created_at: string
   status: 'active' | 'blocked' | 'pending'
+  direction?: 'incoming' | 'outgoing'
 }
 
 export type DbMessage = {

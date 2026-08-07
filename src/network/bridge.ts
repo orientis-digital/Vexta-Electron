@@ -6,7 +6,7 @@ import {
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbFileTransfer } from '../crypto/db_manager'
 import { cacheReceivedMedia, decryptFileChunk } from '../crypto/file_transfer'
-import { base64ToUtf8, decodePayload, encodePayload, utf8ToBase64 } from './codec'
+import { decodePayload, utf8ToBase64 } from './codec'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -350,8 +350,8 @@ export class VextaBridgeClient {
       }
 
       this.friendRequestsListeners.forEach((fn) => fn(reqs))
-      appEvents.emit('requests_updated', { requests: reqs })
-      appEvents.emit('contacts_reloaded', {})
+      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_contacts_updated'))
     } else if (payload.type === 'FRIENDS_LIST') {
       console.log(`[Vexta WSS] Received FRIENDS_LIST:`, payload.friends)
       const friends = payload.friends || []
@@ -383,8 +383,8 @@ export class VextaBridgeClient {
         }
       }
       this.friendsListeners.forEach((fn) => fn(friends))
-      appEvents.emit('friends_updated', { friends })
-      appEvents.emit('contacts_reloaded', {})
+      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_contacts_updated'))
     } else if (payload.type === 'FRIEND_REQUEST_SENT') {
       console.log(`[Vexta WSS] FRIEND_REQUEST_SENT confirmed for:`, payload.recipient)
       this.listFriendRequests()

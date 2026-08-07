@@ -63,6 +63,8 @@ function formatDisplayTime(ts: any): string {
   return String(ts)
 }
 
+const SYSTEM_CHANNEL = 'Vexta - Global Message'
+
 function loadUserContacts(): Contact[] {
   const activeUser = localStorage.getItem('vexta_active_user') || ''
   if (!activeUser) return []
@@ -781,6 +783,8 @@ function AppLayout() {
             </div>
           </div>
         </div>
+      )}
+
       {/* In-App Floating Message Notification Banner */}
       {notification && (
         <div
