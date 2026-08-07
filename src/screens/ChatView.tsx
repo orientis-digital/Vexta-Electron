@@ -6,6 +6,7 @@ import { base64ToUtf8, isControlMessage, utf8ToBase64 } from '../network/codec'
 import { webrtcManager } from '../network/webrtc'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
+  blobToDataURL,
   encryptFileChunk,
   generateFileKey,
   saveMediaToDownloads,
@@ -305,9 +306,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       setMessages(formatted)
 
       const handleMessagesUpdated = (e: any) => {
-        const detailName = e.detail?.name
-        const detailChatId = e.detail?.chatId
-        if (!detailName || detailName === name || detailName === chatId || detailChatId === chatId || detailChatId === name) {
+        const detailName = (e.detail?.name || '').replace(/^@/, '').toLowerCase()
+        const detailChatId = (e.detail?.chatId || '').replace(/^@/, '').toLowerCase()
+        const cleanName = (name || '').replace(/^@/, '').toLowerCase()
+        const cleanChatId = (chatId || '').replace(/^@/, '').toLowerCase()
+
+        if (!detailName || detailName === cleanName || detailName === cleanChatId || detailChatId === cleanChatId || detailChatId === cleanName) {
           const freshDbMsgs = db.getMessages(name).filter((m) => {
             const text = m.ciphertext || ''
             if (
@@ -500,13 +504,17 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
     const activeUser = localStorage.getItem('vexta_active_user') || ''
 
-    if (isGroup(chatId)) {
-      const db = new VextaDatabaseManager(activeUser)
-      const members = db.getGroupMembers(name)
-      bridgeClient.sendGroupMessage(name, members, text || attachment?.name || '')
-    } else {
-      bridgeClient.sendBlindMessage(name, utf8ToBase64(text || ''))
+    if (text.trim()) {
+      if (isGroup(chatId)) {
+        const db = new VextaDatabaseManager(activeUser)
+        const members = db.getGroupMembers(name)
+        bridgeClient.sendGroupMessage(name, members, text)
+      } else {
+        bridgeClient.sendBlindMessage(name, utf8ToBase64(text))
+      }
     }
+
+    let persistentAttachment = attachment
 
     if (selectedFileObj) {
       try {
@@ -514,6 +522,29 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         const fileKey = generateFileKey()
         const { chunks, fileHash } = await sliceFile(cleanBlob)
         const transferId = `tf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+
+        let persistentUrl: string | undefined = undefined
+        if (cleanBlob.size < 5 * 1024 * 1024) {
+          try {
+            persistentUrl = await blobToDataURL(cleanBlob)
+          } catch {
+            persistentUrl = attachment?.url
+          }
+        } else {
+          persistentUrl = attachment?.url
+        }
+
+        const ext = (cleanFilename.split('.').pop() || '').toLowerCase()
+        const isPhoto = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)
+        const isVideo = ['mp4', 'webm', 'mkv', 'mov', 'avi'].includes(ext)
+        const kind: 'file' | 'photo' | 'video' = isPhoto ? 'photo' : isVideo ? 'video' : 'file'
+
+        persistentAttachment = {
+          kind,
+          name: cleanFilename,
+          size: formatBytes(cleanBlob.size),
+          url: persistentUrl,
+        }
 
         bridgeClient.sendFileInit(name, {
           transfer_id: transferId,
@@ -528,24 +559,27 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         for (let i = 0; i < chunks.length; i++) {
           const encChunk = await encryptFileChunk(fileKey, chunks[i])
           bridgeClient.sendFileChunk(name, transferId, i, encChunk)
+          if (i > 0 && i % 5 === 0) {
+            await new Promise((r) => setTimeout(r, 10))
+          }
         }
       } catch (err) {
         console.warn('[Vexta File Transfer] Error encrypting/sending file:', err)
       }
     }
 
-    if (activeUser && (text || attachment)) {
+    if (activeUser && (text || persistentAttachment)) {
       try {
         const db = new VextaDatabaseManager(activeUser)
         db.saveMessage({
           sender: activeUser,
           recipient: name,
-          ciphertext: text || attachment?.name || 'Attachment',
+          ciphertext: text || persistentAttachment?.name || 'Attachment',
           timestamp: new Date().toISOString(),
           is_read: 1,
           timer: timer || undefined,
-          voiceUrl: attachment && attachment.url && (attachment.kind as string) === 'audio' ? attachment.url : undefined,
-          attachment: attachment || undefined,
+          voiceUrl: persistentAttachment && persistentAttachment.url && (persistentAttachment.kind as string) === 'audio' ? persistentAttachment.url : undefined,
+          attachment: persistentAttachment || undefined,
         })
       } catch (e) {
         console.warn('[Vexta DB] Error saving outbound message:', e)
@@ -567,7 +601,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         timestamp: nowTimestamp(),
         rawDate: new Date().toISOString(),
         me: true,
-        attachment: attachment || undefined,
+        attachment: persistentAttachment || undefined,
         timer: timer || undefined,
         replyTo: replySnippet,
       },
@@ -589,7 +623,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
   // Send Audio Voice Note
   async function handleSendVoiceBlob(audioBlob: Blob) {
     const activeUser = localStorage.getItem('vexta_active_user') || ''
-    const voiceUrl = URL.createObjectURL(audioBlob)
+    let voiceUrl: string = ''
+    try {
+      voiceUrl = await blobToDataURL(audioBlob)
+    } catch {
+      voiceUrl = URL.createObjectURL(audioBlob)
+    }
 
     try {
       const fileKey = generateFileKey()
@@ -609,6 +648,9 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       for (let i = 0; i < chunks.length; i++) {
         const encChunk = await encryptFileChunk(fileKey, chunks[i])
         bridgeClient.sendFileChunk(name, transferId, i, encChunk)
+        if (i > 0 && i % 5 === 0) {
+          await new Promise((r) => setTimeout(r, 10))
+        }
       }
 
       if (activeUser) {
@@ -619,6 +661,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           ciphertext: `🎤 Voice note (${Math.round(audioBlob.size / 1024)} KB)`,
           timestamp: new Date().toISOString(),
           is_read: 1,
+          voiceUrl: voiceUrl,
         })
       }
     } catch (err) {
