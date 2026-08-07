@@ -375,7 +375,7 @@ function FriendsView() {
                     <button
                       type="button"
                       className="btn-danger-outline"
-                      onClick={() => declineRequest(r.id, r.name)}
+                      onClick={() => rejectRequest(r.id, r.name)}
                     >
                       Decline
                     </button>
@@ -384,7 +384,7 @@ function FriendsView() {
                   <button
                     type="button"
                     className="btn-secondary"
-                    onClick={() => declineRequest(r.id, r.name)}
+                    onClick={() => rejectRequest(r.id, r.name)}
                   >
                     Cancel Request
                   </button>

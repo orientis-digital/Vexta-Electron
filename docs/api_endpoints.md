@@ -1,145 +1,195 @@
 # Vexta API Endpoints & Bridge Protocol
 
-All network surfaces used by the Vexta client, sourced from the original
-codebase (`core/controller.py`, `network/client.py`). The bridge server is a
-fork of the Substrata Bridge (Django/Channels, default `vexta-api.nexusec.space`).
+This document details all network surfaces used by the Vexta desktop client and the Rust Relay Bridge (`vexta-bridge-v2`).
 
-Two surfaces exist:
+Two communication surfaces exist:
 
-1. **HTTP API** — direct REST calls made with `urllib` for account checks and
-   announcements.
-2. **WebSocket API** — the real-time relay protocol over `wss://<host>/ws/chat/`.
-   All message payloads are opaque E2EE ciphertext blobs; the bridge never sees
-   plaintext.
+1. **HTTP / REST API** — Direct HTTP requests for account checks, announcements, and administrative server management.
+2. **WebSocket API** — Real-time relay protocol operating over `wss://<host>/ws/chat/` (or `ws://`). All message payloads are opaque E2EE ciphertext blobs; the bridge server never sees plaintext.
 
 ---
 
-## HTTP API
+## 1. Public REST API Endpoints
 
-Base URL: `https://<host>` (http only for localhost/127.0.0.1).
+Base URL: `http://<host>:8000` (or `https://<host>`).
 
-### `GET /api/check-account/` — pre-flight ping
+### `GET /api/check-account/:username`
+Checks whether a username is registered on the relay server and returns its public key.
 
-- Purpose: connectivity check before opening the WebSocket.
-- Responses:
-  - `200` — server reachable.
-  - `403` — **treated as success** (Cloudflare WAF / Bot Fight Mode detected;
-    the client logs a warning and proceeds).
-  - Other codes — failure, shown to the user.
-- Headers sent: browser-like `User-Agent`, `Accept`, `Origin`,
-  `Accept-Language`, `Referer`. Timeout 8 s.
+- **URL Parameter**: `username` — Target account name.
+- **Response `200 OK`**:
+  ```json
+  {
+    "exists": true,
+    "username": "komradkat",
+    "ed25519_pubkey": "A93f72..."
+  }
+  ```
+- **Response `404 Not Found`**:
+  ```json
+  {
+    "exists": false,
+    "username": "unknown_user",
+    "ed25519_pubkey": ""
+  }
+  ```
 
-### `POST /api/check-account/` — verify username / vault existence
+### `GET /api/announcements/`
+Retrieves public system announcements.
 
-- Request body: `{"username": "<username>"}`
-- Response: `{"exists": bool, "vault_exists": bool}`
-- `404` → `exists: false` (account not found).
-- Headers: same browser-like set, `Content-Type: application/json`,
-  `Content-Length`. Timeout 5 s.
-
-### `GET /api/announcements/?limit=5` — global announcements
-
-- Purpose: pull up to the 5 most recent signed global announcements.
-- Response: `{"announcements": [{"id", "message", "signature", "created_at"}], "server_public_key": "<PEM>"}`
-- `signature` is a base64 RSA signature over the message bytes, verified with
-  the server's public key (TOFU-trusted on first use against the host
-  fingerprint).
-- Timeout 10 s.
-- New announcements are stored as system messages from the
-  `Vexta - Global Message` contact with prefix `SYSTEM:Vexta - Global Message:`.
+- **Response `200 OK`**:
+  ```json
+  [
+    {
+      "id": 1,
+      "message": "Welcome to Vexta V2 High-Performance Rust Relay Bridge.",
+      "created_at": "2026-08-03T15:00:00Z"
+    }
+  ]
+  ```
 
 ---
 
-## WebSocket API (`wss://<host>/ws/chat/`)
+## 2. Protected Admin REST API
 
-Browser-like headers (`User-Agent`, `Host`, `Origin`, `Referer`,
-`Sec-Fetch-*`, etc.) to pass Cloudflare. Ping/keepalive every 20 s.
+All administrative endpoints require authentication via the `X-Admin-Secret` HTTP header matching `ADMIN_SECRET_TOKEN`.
 
-### Auth handshake (per connection)
+### `GET /admin/`
+Embedded HTML web administration dashboard.
 
-1. Server → `AUTH_CHALLENGE` `{"nonce", "server_public_key", "server_signature"}`
-2. Client validates nonce (≥32 bytes, hex, replay-guarded), verifies the
-   server's signature over the nonce (mutual auth), then TOFU-checks the
-   fingerprint (SHA-256 of `server_public_key`). "Changed" fingerprint aborts
-   the connection with a MITM warning.
-3. Client signs the nonce with its RSA-4096 key and replies with `REGISTER`
-   (new account) or `AUTH_RESPONSE` (existing).
-4. Server → `AUTH_SUCCESS` or `AUTH_ERROR`.
+### `GET /api/admin/stats`
+Returns bridge server health metrics and telemetry.
+- **Header**: `X-Admin-Secret: <secret>`
+- **Response `200 OK`**:
+  ```json
+  {
+    "online_users": ["komradkat"],
+    "total_messages_relayed": 1420,
+    "total_pending_offline_messages": 3,
+    "total_users": 15
+  }
+  ```
 
-### Client → Server messages
+### `GET /api/admin/users`
+Lists registered accounts on the server.
+- **Header**: `X-Admin-Secret: <secret>`
 
-| Type | Payload |
+### `DELETE /api/admin/users/:username`
+Deletes a user account and associated offline data.
+- **Header**: `X-Admin-Secret: <secret>`
+
+### `GET /api/admin/announcements`
+Lists admin system announcements.
+- **Header**: `X-Admin-Secret: <secret>`
+
+### `POST /api/admin/announcements`
+Publishes a new announcement.
+- **Header**: `X-Admin-Secret: <secret>`
+- **Body**: `{"message": "<content>"}`
+
+### `DELETE /api/admin/announcements/:id`
+Deletes an announcement by numeric ID.
+- **Header**: `X-Admin-Secret: <secret>`
+
+---
+
+## 3. WebSocket API (`wss://<host>/ws/chat/`)
+
+Binary (MessagePack) or Text (JSON) framed WebSocket stream with keepalive heartbeats every 20s.
+
+### Authentication & Handshake Protocol
+
+1. **`AUTH_CHALLENGE`** (Server -> Client):
+   ```json
+   {
+     "type": "AUTH_CHALLENGE",
+     "nonce": "c4a7f3...",
+     "server_public_key": "MCow...",
+     "server_signature": "z8K..."
+   }
+   ```
+2. **`AUTH_RESPONSE`** or **`REGISTER`** (Client -> Server):
+   ```json
+   {
+     "type": "AUTH_RESPONSE",
+     "username": "komradkat",
+     "public_key": "A93f72...",
+     "nonce": "c4a7f3...",
+     "signature": "m1B90z...",
+     "hardware_hash": "a1b2c3...",
+     "device_name": "Linux Desktop"
+   }
+   ```
+3. **`AUTH_SUCCESS`** or **`AUTH_ERROR`** (Server -> Client):
+   Confirms authentication status.
+
+---
+
+### Client -> Server WebSocket Frames
+
+| Type | Description & Key Payload Fields |
 |---|---|
-| `REGISTER` | `username`, `public_key` (b64), `signature` (nonce sig), `hardware_hash`, `device_name`, `os_name`, `os_version`, `device_type`, `app_version` |
-| `AUTH_RESPONSE` | same as REGISTER + `passcode` = HMAC-SHA256(nonce, SHA256(passcode)) — raw passcode never sent |
-| `SEND_MESSAGE` | `recipient`, `ciphertext` (E2EE blob), `self_ciphertext?` (own copy for multi-device sync) |
-| `ACK` | `id`, `hardware_hash?` |
-| `UPDATE_KEY` | `new_public_key` (b64) |
-| `GET_PREKEY` | `username?` or `user_id?` |
-| `UPDATE_VAULT` | `enc_vault` (base64 of JSON vault backup) |
-| `GET_VAULT` | `username` |
+| `REGISTER` | `username`, `public_key`, `signature`, `hardware_hash`, `device_name`, `os_name` |
+| `AUTH_RESPONSE` | `username`, `public_key`, `nonce`, `signature`, `hardware_hash`, `device_name` |
+| `SEND_MESSAGE` | `recipient`, `ciphertext`, `is_group`, `timestamp` |
+| `ACK` | `message_id` |
+| `PING` | `timestamp` |
 | `SEND_FRIEND_REQUEST` | `recipient` |
-| `ACCEPT_FRIEND_REQUEST` | `request_id` |
-| `REJECT_FRIEND_REQUEST` | `request_id` |
-| `LIST_FRIEND_REQUESTS` | — |
+| `ACCEPT_FRIEND_REQUEST` | `request_id` or `username` |
+| `REJECT_FRIEND_REQUEST` | `request_id` or `username` |
 | `LIST_FRIENDS` | — |
+| `LIST_FRIEND_REQUESTS` | — |
 | `REMOVE_FRIEND` | `username` |
-| `DELETE_ACCOUNT` | — |
-| `UPDATE_RECOVERY_LOCK` | `lock_hash` (SHA-256 of recovery code) |
-| `LIST_DEVICES` | — |
-| `REVOKE_DEVICE` | `hardware_hash` |
-| `DEVICE_LOGIN_REQUEST` | `username`, `device_name`, `os_name`, `device_pubkey`, `pin_challenge_hash` |
-| `APPROVE_DEVICE` | `target_device_id`, `encrypted_key_bundle`, `encrypted_friend_roster` |
-| `REJECT_DEVICE` | `target_device_id` |
+| `UPDATE_VAULT` | `enc_vault` |
+| `GET_VAULT` | `username` |
 | `SYNC_FRIEND_ROSTER` | `encrypted_roster_blob` |
 | `GET_FRIEND_ROSTER` | — |
+| `DEVICE_LOGIN_REQUEST` | `username`, `device_name`, `os_name`, `device_pubkey`, `pin_challenge_hash` |
+| `APPROVE_DEVICE` | `target_device_id`, `encrypted_key_bundle`, `encrypted_friend_roster` |
+| `REJECT_DEVICE` | `target_device_id`, `reason` |
+| `LIST_DEVICES` | — |
+| `REVOKE_DEVICE` | `hardware_hash` |
+| `UPDATE_KEY` | `new_public_key` |
+| `UPDATE_RECOVERY_LOCK` | `lock_hash` |
+| `DELETE_ACCOUNT` | — |
 
-### Server → Client messages
+---
 
-| Type | Payload | Notes |
-|---|---|---|
-| `AUTH_CHALLENGE` | `nonce`, `server_public_key`, `server_signature` | initiate handshake |
-| `AUTH_SUCCESS` | `user_id`, `first_login`, `device_status?` | `device_status`: "active" or "pending_approval" |
-| `AUTH_ERROR` | `message` | |
-| `PUSH_DEVICE_REQUEST` | `device_id`, `device_name`, `os_name`, `pin_challenge`, `device_pubkey` | sent to primary active device when new device requests authorization |
-| `DEVICE_APPROVED_EVENT` | `encrypted_key_bundle`, `encrypted_friend_roster` | sent to pending device upon primary device approval |
-| `DEVICE_REJECTED_EVENT` | `reason` | sent to pending device upon primary device rejection |
-| `FRIEND_ROSTER_RESPONSE` | `encrypted_roster_blob` | returns encrypted friend roster for synced setup |
-| `BLIND_MESSAGE` | `sender`, `ciphertext`, `id`, `timestamp` | relayed E2EE message |
-| `PREKEY_BUNDLE` | `username`, `identity_key` | contact key refresh |
-| `VAULT_RESPONSE` | `enc_vault` | during account recovery |
-| `KEY_UPDATE_SUCCESS` | — | |
-| `DELETE_ACCOUNT_SUCCESS` | — | client wipes local DB after this |
-| `RECOVERY_LOCK_UPDATED` | — | |
-| `DEVICE_LIST` | `devices` | |
-| `DEVICE_REVOKED_SUCCESS` | `hardware_hash` | |
-| `ERROR` | `message` | contains "revoked"/"session" → client disconnects |
-| `FRIEND_REQUEST` | request data | |
-| `FRIEND_REQUEST_ACCEPTED` | `sender`/`accepted_by` | client then fetches prekey |
-| `FRIEND_REQUEST_REJECTED` | — | |
-| `FRIEND_REQUEST_LIST` | `requests` | |
-| `FRIENDS_LIST` | `friends` (`[{username}]`) | client fetches each prekey |
-| `FRIEND_REQUEST_SENT` | `recipient` | |
-| `FRIEND_REQUEST_ERROR` | `message` | |
+### Server -> Client WebSocket Frames
 
-### E2EE payload types (inside the decrypted envelope)
-
-These are encrypted with the recipient's public key and only decrypted client-side:
-
-| Type | Purpose |
+| Type | Description & Key Payload Fields |
 |---|---|
-| `{"sender", "body"}` | direct message |
-| `{"type": "group_msg", group_uuid, group_name, sender, body}` | group message (fanned out per member) |
-| `{"type": "group_invite", group_uuid, group_name, members}` | group creation / add member |
-| `{"type": "group_update", group_uuid, group_name, members}` | roster change (creator only) |
-| `{"type": "group_kick", group_uuid, group_name}` | kick → deletes local group |
-| `{"type": "file_init", transfer_id, filename, file_size, chunk_size, total_chunks, file_key, file_hash}` | start file transfer (file_key = hex AES-256 key) |
-| `{"type": "file_ack_init", transfer_id}` | receiver ready |
-| `{"type": "file_chunk", transfer_id, chunk_index, data}` | encrypted 128 KB chunk |
-| `{"type": "file_ack", transfer_id, chunk_index}` | ordered ACK loop |
-| `{"type": "file_status_query", transfer_id}` / `file_status_response` | resume support |
-| `{"type": "file_cancel", transfer_id}` | abort |
-| `{"type": "metadata_sync", action, data}` | self-addressed device sync (`SYNC_META:` prefix), actions: `ADD_CONTACT`, `DELETE_CONTACT`, `CREATE_GROUP`, `DELETE_GROUP`, `UPDATE_GROUP_MEMBERS` |
+| `AUTH_CHALLENGE` | `nonce`, `server_public_key`, `server_signature` |
+| `AUTH_SUCCESS` | `username` |
+| `AUTH_ERROR` | `reason` |
+| `BLIND_MESSAGE` | `id`, `sender`, `ciphertext`, `timestamp`, `is_group` |
+| `PONG` | `timestamp` |
+| `FRIEND_REQUEST_SENT` | `request_id`, `recipient` |
+| `FRIEND_REQUESTS_LIST` | `requests` (`[{id, sender, recipient, status, created_at}]`) |
+| `FRIENDS_LIST` | `friends` (`["alice", "bob"]`) |
+| `VAULT_RESPONSE` | `vault_data` |
+| `FRIEND_ROSTER_RESPONSE` | `encrypted_roster_blob` |
+| `PUSH_DEVICE_REQUEST` | `device_id`, `device_name`, `os_name`, `pin_challenge`, `device_pubkey` |
+| `DEVICE_APPROVED_EVENT` | `encrypted_key_bundle`, `encrypted_friend_roster` |
+| `DEVICE_REJECTED_EVENT` | `reason` |
+| `DEVICES_LIST` | `devices` (`[{id, username, hardware_hash, device_name, registered_at}]`) |
+| `DELETE_ACCOUNT_SUCCESS` | Confirms account deletion |
+| `ERROR` | `message` |
 
-Self-sync copies are wrapped with the `SYNC:sent:` prefix (and optionally
-`SYNC_META:` for metadata sync).
+---
+
+## 4. End-to-End Encrypted Inner Payloads
+
+These JSON structures are encrypted with recipient public keys prior to transmission via `SEND_MESSAGE`:
+
+| Type / Structure | Description |
+|---|---|
+| Direct Text Message | `{"sender": "alice", "body": "Hello world"}` |
+| Group Chat Message | `{"type": "group_msg", "group_uuid": "...", "group_name": "...", "sender": "...", "body": "..."}` |
+| Group Invitation | `{"type": "group_invite", "group_uuid": "...", "group_name": "...", "members": [...]}` |
+| Group Roster Update | `{"type": "group_update", "group_uuid": "...", "group_name": "...", "members": [...]}` |
+| Group Kick | `{"type": "group_kick", "group_uuid": "...", "group_name": "..."}` |
+| File Init | `{"type": "file_init", "transfer_id": "...", "filename": "...", "file_size": 1048576, "chunk_size": 131072, "total_chunks": 8, "file_key": "...", "file_hash": "..."}` |
+| File Chunk | `{"type": "file_chunk", "transfer_id": "...", "chunk_index": 0, "data": "<b64>"}` |
+| File ACK | `{"type": "file_ack", "transfer_id": "...", "chunk_index": 0}` |
+| Metadata Sync | `{"type": "metadata_sync", "action": "ADD_CONTACT", "data": {...}}` (wrapped in `SYNC_META:`) |
