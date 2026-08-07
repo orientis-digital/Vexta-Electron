@@ -50,6 +50,7 @@ function getSystemInfo() {
   const isLinux = process.platform === 'linux'
 
   return {
+    appVersion: app.getVersion() || '0.0.0.5',
     osName,
     osVersion: `${release} (${arch})`,
     deviceName: `${osName} (${arch})`,
@@ -66,10 +67,13 @@ function getSystemInfo() {
 }
 
 function createWindow() {
+  const currentAppVersion = app.getVersion() || '0.0.0.5'
+  const windowTitle = `Vexta by Orientis Digital - v${currentAppVersion}`
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    title: 'Vexta - Zero-Knowledge Messenger',
+    title: windowTitle,
     icon: path.join(__dirname, '../public/icon.png'),
     webPreferences: {
       nodeIntegration: false,
@@ -77,6 +81,11 @@ function createWindow() {
       webSecurity: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  // Prevent renderer document.title from overriding window title
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault()
   })
 
   if (screenProtection && process.platform !== 'linux') {
@@ -347,33 +356,96 @@ ipcMain.handle('lock-vault-from-renderer', () => {
 
 const https = require('https')
 const http = require('http')
+const crypto = require('crypto')
+const { spawn } = require('child_process')
 
-function fetchRemoteText(url) {
+function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http
     client
-      .get(url, (res) => {
+      .get(url, { headers: { 'User-Agent': 'Vexta-Desktop-Updater' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(fetchRemoteText(res.headers.location))
+          return resolve(fetchJson(res.headers.location))
         }
         if (res.statusCode !== 200) {
           return reject(new Error(`HTTP ${res.statusCode}`))
         }
-        let data = ''
-        res.on('data', (chunk) => (data += chunk))
-        res.on('end', () => resolve(data))
+        let raw = ''
+        res.on('data', (chunk) => (raw += chunk))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(raw))
+          } catch (err) {
+            reject(new Error(`Invalid JSON response: ${err.message}`))
+          }
+        })
       })
       .on('error', reject)
   })
 }
 
-function parseYmlVersion(ymlText) {
-  const match = ymlText.match(/^version:\s*([^\s\r\n]+)/m)
-  return match ? match[1].trim() : null
+function downloadFileWithProgress(url, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http
+    const req = client.get(url, { headers: { 'User-Agent': 'Vexta-Desktop-Updater' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(downloadFileWithProgress(res.headers.location, destPath, onProgress))
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP status ${res.statusCode} downloading update payload`))
+      }
+
+      const totalBytes = parseInt(res.headers['content-length'] || '0', 10)
+      let downloadedBytes = 0
+      const fileStream = fs.createWriteStream(destPath)
+      const hashStream = crypto.createHash('sha256')
+
+      res.on('data', (chunk) => {
+        downloadedBytes += chunk.length
+        hashStream.update(chunk)
+        if (totalBytes > 0 && onProgress) {
+          const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+          onProgress(percent, downloadedBytes, totalBytes)
+        }
+      })
+
+      res.pipe(fileStream)
+
+      fileStream.on('finish', () => {
+        fileStream.close(() => {
+          const calculatedSha256 = hashStream.digest('hex')
+          resolve({ calculatedSha256, totalBytes: downloadedBytes })
+        })
+      })
+
+      fileStream.on('error', (err) => {
+        fs.unlink(destPath, () => reject(err))
+      })
+    })
+
+    req.on('error', reject)
+  })
+}
+
+function compareVersions(v1, v2) {
+  const cleanV1 = String(v1).replace(/^v/i, '').split('.').map(Number)
+  const cleanV2 = String(v2).replace(/^v/i, '').split('.').map(Number)
+  const maxLen = Math.max(cleanV1.length, cleanV2.length)
+  for (let i = 0; i < maxLen; i++) {
+    const num1 = cleanV1[i] || 0
+    const num2 = cleanV2[i] || 0
+    if (num1 > num2) return 1
+    if (num1 < num2) return -1
+  }
+  return 0
 }
 
 // ── Auto-Update Engine ────────────────────────────────
-let updateDownloaded = false
+let updateState = {
+  downloaded: false,
+  installerPath: null,
+  latestRelease: null,
+}
 
 ipcMain.handle('check-for-updates', async () => {
   if (!mainWindow) return { status: 'up_to_date' }
@@ -381,63 +453,131 @@ ipcMain.handle('check-for-updates', async () => {
   try {
     mainWindow.webContents.send('update-status', { status: 'checking', progress: 0 })
 
-    const currentVersion = app.getVersion() || '0.0.3'
-    const manifestName =
-      process.platform === 'win32'
-        ? 'latest.yml'
-        : process.platform === 'darwin'
-          ? 'latest-mac.yml'
-          : 'latest-linux.yml'
+    const currentVersion = app.getVersion() || '0.0.0.5'
+    const releaseApiUrl = 'https://downloads.nexusec.space/api/v1/vexta/latest'
+    console.log(`[Vexta Auto-Update] Querying downloads server release API: ${releaseApiUrl}...`)
 
-    const remoteUrl = `https://downloads.nexusec.space/vexta/${manifestName}`
-    console.log(`[Vexta Auto-Update] Querying downloads server at ${remoteUrl}...`)
+    const releaseData = await fetchJson(releaseApiUrl)
+    const latestVersion = releaseData.latest_version
 
-    let latestVersion = null
-    try {
-      const ymlText = await fetchRemoteText(remoteUrl)
-      latestVersion = parseYmlVersion(ymlText)
-      console.log(`[Vexta Auto-Update] Parsed remote version: v${latestVersion}`)
-    } catch (err) {
-      console.warn(`[Vexta Auto-Update] Remote manifest query error:`, err.message)
+    if (!latestVersion) {
+      throw new Error('Release API returned invalid version payload')
     }
 
-    latestVersion = latestVersion || '1.0.0'
+    console.log(`[Vexta Auto-Update] Current: v${currentVersion} | Server Latest: v${latestVersion}`)
 
-    if (currentVersion === latestVersion) {
+    // If current version >= latest version, we are up to date
+    if (compareVersions(currentVersion, latestVersion) >= 0) {
       mainWindow.webContents.send('update-status', { status: 'up_to_date', version: currentVersion })
       return { status: 'up_to_date', version: currentVersion }
     }
 
     mainWindow.webContents.send('update-status', { status: 'available', version: latestVersion })
 
-    for (let percent = 15; percent <= 100; percent += 20) {
-      await new Promise((r) => setTimeout(r, 350))
-      if (mainWindow) {
-        mainWindow.webContents.send('update-status', {
-          status: 'downloading',
-          progress: Math.min(100, percent),
-          version: latestVersion,
-        })
+    // Match platform artifact key from downloads-server
+    const artifacts = releaseData.artifacts || {}
+    let targetArtifact = null
+
+    if (process.platform === 'win32') {
+      targetArtifact = artifacts['windows_msi'] || Object.values(artifacts).find(a => a.platform === 'windows')
+    } else if (process.platform === 'darwin') {
+      targetArtifact = artifacts['macos_dmg'] || Object.values(artifacts).find(a => a.platform === 'macos')
+    } else {
+      // linux
+      targetArtifact = artifacts['linux_appimage'] || artifacts['linux_deb'] || Object.values(artifacts).find(a => a.platform === 'linux')
+    }
+
+    // Fallback if platform specific key not directly matched
+    if (!targetArtifact) {
+      const fallbackUrl = process.platform === 'win32'
+        ? 'https://downloads.nexusec.space/api/v1/vexta/download/windows'
+        : 'https://downloads.nexusec.space/api/v1/vexta/download/linux'
+      targetArtifact = {
+        url: fallbackUrl,
+        filename: `vexta-update-${latestVersion}-${process.platform}`,
+        sha256: releaseData.checksums?.sha256 || null,
       }
     }
 
-    updateDownloaded = true
+    const updateDir = path.join(app.getPath('userData'), '.updates')
+    if (!fs.existsSync(updateDir)) {
+      fs.mkdirSync(updateDir, { recursive: true })
+    }
+
+    const targetFilename = targetArtifact.filename || `vexta-v${latestVersion}-${process.platform}`
+    const destInstallerPath = path.join(updateDir, targetFilename)
+
+    console.log(`[Vexta Auto-Update] Downloading artifact from ${targetArtifact.url} -> ${destInstallerPath}`)
+
+    let lastReportedPercent = -1
+    const downloadResult = await downloadFileWithProgress(targetArtifact.url, destInstallerPath, (percent) => {
+      if (percent !== lastReportedPercent) {
+        lastReportedPercent = percent
+        if (mainWindow) {
+          mainWindow.webContents.send('update-status', {
+            status: 'downloading',
+            progress: percent,
+            version: latestVersion,
+          })
+        }
+      }
+    })
+
+    // Verify SHA-256 Checksum if server provided expected sha256
+    if (targetArtifact.sha256 && targetArtifact.sha256.length === 64) {
+      const expectedSha256 = targetArtifact.sha256.toLowerCase()
+      const actualSha256 = downloadResult.calculatedSha256.toLowerCase()
+
+      if (expectedSha256 !== actualSha256) {
+        throw new Error(`SHA256 Checksum mismatch! Expected ${expectedSha256}, got ${actualSha256}`)
+      }
+      console.log(`[Vexta Auto-Update] SHA256 integrity verified successfully (${actualSha256})`)
+    }
+
+    // Make executable if Linux
+    if (process.platform === 'linux') {
+      try {
+        fs.chmodSync(destInstallerPath, 0o755)
+      } catch {}
+    }
+
+    updateState = {
+      downloaded: true,
+      installerPath: destInstallerPath,
+      latestRelease: releaseData,
+    }
+
     if (mainWindow) {
       mainWindow.webContents.send('update-status', { status: 'downloaded', version: latestVersion })
     }
     return { status: 'downloaded', version: latestVersion }
   } catch (err) {
+    console.error('[Vexta Auto-Update Error]', err)
     if (mainWindow) {
-      mainWindow.webContents.send('update-status', { status: 'error', error: String(err) })
+      mainWindow.webContents.send('update-status', { status: 'error', error: err.message || String(err) })
     }
-    return { status: 'error', error: String(err) }
+    return { status: 'error', error: err.message || String(err) }
   }
 })
 
 ipcMain.handle('restart-and-install', () => {
-  if (!updateDownloaded) {
+  if (!updateState.downloaded || !updateState.installerPath) {
     return { success: false, reason: 'No update downloaded yet' }
   }
+
+  const installerPath = updateState.installerPath
+  console.log(`[Vexta Auto-Update] Triggering installer at ${installerPath}...`)
+
+  if (process.platform === 'win32') {
+    if (installerPath.endsWith('.msi')) {
+      spawn('msiexec', ['/i', installerPath, '/qb'], { detached: true, stdio: 'ignore' }).unref()
+    } else {
+      spawn(installerPath, ['/S'], { detached: true, stdio: 'ignore' }).unref()
+    }
+  } else if (process.platform === 'linux' && installerPath.endsWith('.AppImage')) {
+    spawn(installerPath, [], { detached: true, stdio: 'ignore' }).unref()
+  }
+
   app.isQuitting = true
   app.relaunch()
   app.exit(0)
