@@ -219,13 +219,19 @@ export class VextaDatabaseManager {
 
   addContact(contact: DbContact) {
     const contacts = this.getContacts()
-    const updated = contacts.filter((c) => c.username !== contact.username)
-    updated.push(contact)
+    const cleanUsername = (contact.username || '').trim().replace(/^@/, '').toLowerCase()
+    const updated = contacts.filter((c) => (c.username || '').trim().replace(/^@/, '').toLowerCase() !== cleanUsername)
+    const normalizedContact: DbContact = {
+      ...contact,
+      username: (contact.username || '').trim().replace(/^@/, '')
+    }
+    updated.push(normalizedContact)
     localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(updated))
   }
 
   removeContact(username: string) {
-    const contacts = this.getContacts().filter((c) => c.username !== username)
+    const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
+    const contacts = this.getContacts().filter((c) => (c.username || '').trim().replace(/^@/, '').toLowerCase() !== cleanUsername)
     localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(contacts))
   }
 
@@ -525,29 +531,33 @@ export class VextaDatabaseManager {
   }
 
   getFriendPresenceOverride(username: string): boolean {
+    const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
     const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
     const overrides = data ? JSON.parse(data) : {}
-    return overrides[username] !== false // Default true (allowed)
+    return overrides[cleanUsername] !== false // Default true (allowed)
   }
 
   setFriendPresenceOverride(username: string, allow: boolean) {
+    const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
     const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
     const overrides = data ? JSON.parse(data) : {}
-    overrides[username] = allow
+    overrides[cleanUsername] = allow
     localStorage.setItem(`${this.storageKey}_presence_overrides`, JSON.stringify(overrides))
   }
 
   updateContactLastActive(username: string, timestamp: string) {
+    const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
     const data = localStorage.getItem(`${this.storageKey}_last_active`)
     const lastActiveMap = data ? JSON.parse(data) : {}
-    lastActiveMap[username] = timestamp
+    lastActiveMap[cleanUsername] = timestamp
     localStorage.setItem(`${this.storageKey}_last_active`, JSON.stringify(lastActiveMap))
   }
 
   getContactLastActive(username: string): string | null {
+    const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
     const data = localStorage.getItem(`${this.storageKey}_last_active`)
     const lastActiveMap = data ? JSON.parse(data) : {}
-    return lastActiveMap[username] || null
+    return lastActiveMap[cleanUsername] || null
   }
 }
 
