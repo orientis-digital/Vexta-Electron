@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ChatInfoView from './ChatInfoView'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
-import { base64ToUtf8, utf8ToBase64 } from '../network/codec'
+import { base64ToUtf8, isControlMessage, utf8ToBase64 } from '../network/codec'
 import { webrtcManager } from '../network/webrtc'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
@@ -389,14 +389,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         ) {
           return
         }
-      } else if (
-        text.includes('call_offer') ||
-        text.includes('call_answer') ||
-        text.includes('call_ice') ||
-        text.includes('call_end') ||
-        text.includes('file_init') ||
-        text.includes('eyJ0eXBlIjoiY2Fsb')
-      ) {
+      } else if (isControlMessage(text) || isControlMessage(rawInput)) {
         return
       }
 

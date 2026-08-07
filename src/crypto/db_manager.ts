@@ -9,6 +9,8 @@
  * - file_transfers
  */
 
+import { isControlMessage } from '../network/codec'
+
 export type DbUserMeta = {
   id: number
   username: string
@@ -304,12 +306,24 @@ export class VextaDatabaseManager {
   getMessages(chatId: string): DbMessage[] {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
-    return all.filter(
-      (m) => m.sender === chatId || m.recipient === chatId || m.recipient === `group_${chatId}` || m.sender === `group_${chatId}`,
-    )
+    return all.filter((m) => {
+      if (!m || !m.ciphertext) return false
+      if (isControlMessage(m.ciphertext)) return false
+      return (
+        m.sender === chatId ||
+        m.recipient === chatId ||
+        m.recipient === `group_${chatId}` ||
+        m.sender === `group_${chatId}`
+      )
+    })
   }
 
   saveMessage(msg: DbMessage) {
+    if (!msg || !msg.ciphertext) return
+    if (isControlMessage(msg.ciphertext)) {
+      return // Ignore control / signaling packets
+    }
+
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
     msg.id = all.length + 1

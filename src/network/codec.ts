@@ -72,3 +72,41 @@ export function decodePayload(input: ArrayBuffer | Uint8Array | string | any): a
 
   return null
 }
+
+/**
+ * Detects whether a raw input or decoded string is an internal signaling / control frame
+ * (presence, file transfer chunk, call signaling, metadata sync) that should never be saved or displayed in chat messages.
+ */
+export function isControlMessage(input: string): boolean {
+  if (!input) return false
+
+  // Base64 prefix signatures for JSON control packets starting with {"type":
+  if (
+    input.includes('eyJ0eXBlIjoicHJlc2VuY2') || // presence
+    input.includes('eyJ0eXBlIjoiZmlsZV') ||     // file_chunk / file_init / file_status
+    input.includes('eyJ0eXBlIjoiY2Fsb') ||      // call_offer / call_answer / call_ice / call_end
+    input.includes('eyJ0eXBlIjoibWV0YW')        // metadata_sync
+  ) {
+    return true
+  }
+
+  let decoded = input
+  try {
+    decoded = base64ToUtf8(input)
+  } catch {
+    decoded = input
+  }
+
+  const c = decoded.toLowerCase()
+  return (
+    c.includes('"type":"presence"') ||
+    c.includes('"type":"file_chunk"') ||
+    c.includes('"type":"file_init"') ||
+    c.includes('"type":"file_status_query"') ||
+    c.includes('"type":"file_status_response"') ||
+    c.includes('"type":"call_offer"') ||
+    c.includes('"type":"call_answer"') ||
+    c.includes('"type":"call_ice"') ||
+    c.includes('"type":"metadata_sync"')
+  )
+}
