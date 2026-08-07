@@ -6,7 +6,7 @@ import {
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbFileTransfer } from '../crypto/db_manager'
 import { cacheReceivedMedia, decryptFileChunk, indexedDbCache } from '../crypto/file_transfer'
-import { decodePayload, isControlMessage, utf8ToBase64 } from './codec'
+import { base64ToUtf8, decodePayload, isControlMessage, utf8ToBase64 } from './codec'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -125,7 +125,6 @@ export class VextaBridgeClient {
   private deviceRejectionListeners: Set<(payload: { reason?: string }) => void> = new Set()
   private friendRequestsListeners: Set<(requests: any[]) => void> = new Set()
   private friendsListeners: Set<(friends: any[]) => void> = new Set()
-  private chunkStorePrefix = 'vexta_chunks_'
 
   constructor(defaultUrl?: string) {
     const savedUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('vexta_bridge_url') : null
@@ -393,6 +392,7 @@ export class VextaBridgeClient {
       this.setStatus('auth_failed')
     } else if (payload.type === 'ERROR') {
       console.error(`[Vexta WSS] ERROR from relay:`, payload.message)
+      window.dispatchEvent(new CustomEvent('vexta_server_error', { detail: { message: payload.message || 'An error occurred' } }))
       if (payload.message && typeof payload.message === 'string' && (payload.message.includes('revoked') || payload.message.includes('session'))) {
         this.setStatus('auth_failed')
       }
@@ -451,15 +451,28 @@ export class VextaBridgeClient {
         try {
           const db = new VextaDatabaseManager(activeUser)
           const rawInput = payload.wire_blob || payload.ciphertext || payload.body || ''
-          let text = rawInput
-          try {
-            if (payload.wire_blob) text = base64ToUtf8(payload.wire_blob)
-            else if (payload.ciphertext) text = base64ToUtf8(payload.ciphertext)
-            else if (payload.body) text = base64ToUtf8(payload.body)
-          } catch {
-            text = rawInput
+          const trimmedInput = rawInput.trim()
+
+          // Attempt base64 → UTF-8 decode only when the input looks like base64
+          // (not a raw JSON object/array which would produce garbage if passed through atob)
+          let text: string = rawInput
+          let decodeSuccess = false
+          if (trimmedInput && !trimmedInput.startsWith('{') && !trimmedInput.startsWith('[')) {
+            try {
+              const decoded = base64ToUtf8(rawInput)
+              if (decoded && decoded !== rawInput) {
+                text = decoded
+                decodeSuccess = true
+              }
+            } catch {
+              // not valid base64 — keep text = rawInput
+            }
           }
 
+          console.log(`[Vexta WSS] Decode: raw="${rawInput.slice(0, 30)}" → text="${text.slice(0, 60)}" (decodeOk=${decodeSuccess})`)
+
+          // Try parsing the decoded text as JSON (for structured control/file frames)
+          // Fall back to parsing the raw input in case it's already plain JSON
           const innerPayload = cleanDecodePayload(text) || cleanDecodePayload(rawInput)
 
           const parseTs = (ts: any): string => {
@@ -537,6 +550,7 @@ export class VextaBridgeClient {
                   ciphertext: `🎤 Voice note (${formatSize(innerPayload.file_size)})`,
                   timestamp: msgTimestamp,
                   is_read: 0,
+                  transfer_id: innerPayload.transfer_id,
                 })
               } else {
                 db.saveMessage({
@@ -545,6 +559,7 @@ export class VextaBridgeClient {
                   ciphertext: innerPayload.filename,
                   timestamp: msgTimestamp,
                   is_read: 0,
+                  transfer_id: innerPayload.transfer_id,
                   attachment: {
                     kind,
                     name: innerPayload.filename,
@@ -559,10 +574,14 @@ export class VextaBridgeClient {
               }
             } else if (innerPayload.type === 'file_chunk') {
               const transfer = db.getFileTransfer(innerPayload.transfer_id)
-              if (transfer) {
+              if (!transfer) {
+                console.warn(`[Vexta WSS] file_chunk received for unknown transfer ${innerPayload.transfer_id} (file_init not yet processed?)`)
+              } else {
                 const chunkIdx = innerPayload.chunk_index !== undefined ? innerPayload.chunk_index : transfer.received_chunks
+                console.log(`[Vexta WSS] Chunk ${chunkIdx}/${transfer.total_chunks - 1} for transfer ${innerPayload.transfer_id}`)
                 indexedDbCache.saveChunk(innerPayload.transfer_id, chunkIdx, innerPayload.data)
                   .then((receivedCount) => {
+                    console.log(`[Vexta WSS] Saved chunk, count=${receivedCount}/${transfer.total_chunks}`)
                     const isComplete = receivedCount >= transfer.total_chunks
 
                     db.updateFileTransferProgress(
@@ -572,6 +591,7 @@ export class VextaBridgeClient {
                     )
 
                     if (isComplete) {
+                      console.log(`[Vexta WSS] Transfer ${innerPayload.transfer_id} complete! Assembling...`)
                       indexedDbCache.getChunks(innerPayload.transfer_id, transfer.total_chunks)
                         .then((allChunks) => {
                           const hasMissing = allChunks.length < transfer.total_chunks || allChunks.some((c) => !c)
@@ -642,32 +662,26 @@ export class VextaBridgeClient {
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: payload.sender } }))
               }
-            } else if (
-              innerPayload.type === 'call_offer' ||
-              innerPayload.type === 'call_answer' ||
-              innerPayload.type === 'call_ice' ||
-              innerPayload.type === 'file_init' ||
-              innerPayload.type === 'file_chunk' ||
-              innerPayload.type === 'file_status_query' ||
-              innerPayload.type === 'file_status_response' ||
-              innerPayload.type === 'presence' ||
-              innerPayload.type === 'metadata_sync'
-            ) {
-              // Internal signaling / control frame — do not persist to messages DB
-            } else if (text && text.trim()) {
-              db.saveMessage({
-                sender: payload.sender,
-                recipient: payload.recipient,
-                ciphertext: text,
-                timestamp: msgTimestamp,
-                is_read: 0,
-              })
+            } else {
+              // Plain text message - save with decoded text and correct recipient
+              if (!isControlMessage(text) && text && text.trim()) {
+                console.log(`[Vexta WSS] Saving plain text msg from @${payload.sender}: "${text.slice(0, 40)}"`)
+                db.saveMessage({
+                  sender: payload.sender,
+                  recipient: activeUser,
+                  ciphertext: text,
+                  timestamp: msgTimestamp,
+                  is_read: 0,
+                })
+              }
             }
           } else {
+            // No structured inner payload — plain text or unrecognized frame
             if (!isControlMessage(rawInput) && !isControlMessage(text) && text && text.trim()) {
+              console.log(`[Vexta WSS] Saving unstructured msg from @${payload.sender}: "${text.slice(0, 40)}"`)
               db.saveMessage({
                 sender: payload.sender,
-                recipient: payload.recipient,
+                recipient: activeUser,
                 ciphertext: text,
                 timestamp: msgTimestamp,
                 is_read: 0,
@@ -1035,22 +1049,24 @@ export class VextaBridgeClient {
       }
 
       if (isVoice) {
-        db.saveMessage({
-          sender: transfer.sender,
-          recipient: transfer.recipient,
-          ciphertext: `🎤 Voice note (${formatSize(blob.size)})`,
-          timestamp: new Date().toISOString(),
-          is_read: 0,
-          voiceUrl: finalPath,
-        })
+        // Try to update the existing placeholder by transfer_id first
+        const updated = db.updateMessageByTransferId(transfer.transfer_id, { voiceUrl: finalPath })
+        if (!updated) {
+          // No placeholder found — save as new (e.g. app restarted mid-transfer)
+          db.saveMessage({
+            sender: transfer.sender,
+            recipient: transfer.recipient,
+            ciphertext: `🎤 Voice note (${formatSize(blob.size)})`,
+            timestamp: new Date().toISOString(),
+            is_read: 0,
+            voiceUrl: finalPath,
+            transfer_id: transfer.transfer_id,
+          })
+        }
       } else {
         const kind: 'file' | 'photo' | 'video' = isPhoto ? 'photo' : isVideo ? 'video' : 'file'
-        db.saveMessage({
-          sender: transfer.sender,
-          recipient: transfer.recipient,
-          ciphertext: transfer.filename,
-          timestamp: new Date().toISOString(),
-          is_read: 0,
+        // Try to update the existing placeholder by transfer_id first
+        const updated = db.updateMessageByTransferId(transfer.transfer_id, {
           attachment: {
             kind,
             name: transfer.filename,
@@ -1058,10 +1074,37 @@ export class VextaBridgeClient {
             url: finalPath,
           },
         })
+        if (!updated) {
+          // No placeholder found — save as new (e.g. app restarted mid-transfer)
+          db.saveMessage({
+            sender: transfer.sender,
+            recipient: transfer.recipient,
+            ciphertext: transfer.filename,
+            timestamp: new Date().toISOString(),
+            is_read: 0,
+            attachment: {
+              kind,
+              name: transfer.filename,
+              size: formatSize(blob.size),
+              url: finalPath,
+            },
+            transfer_id: transfer.transfer_id,
+          })
+        }
       }
 
       const cleanSender = (transfer.sender || '').replace(/^@/, '')
       window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: cleanSender } }))
+      window.dispatchEvent(
+        new CustomEvent('vexta_file_transfer_completed', {
+          detail: {
+            filename: transfer.filename,
+            url: finalPath,
+            sender: cleanSender,
+            transfer_id: transfer.transfer_id,
+          },
+        }),
+      )
       console.log(`[Vexta WSS] Cached file ${transfer.filename} → ${finalPath}`)
     } catch (err) {
       console.error('[Vexta WSS] Failed to cache completed transfer:', err)

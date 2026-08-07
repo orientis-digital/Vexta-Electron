@@ -44,6 +44,7 @@ export type DbMessage = {
   voiceUrl?: string
   attachment?: any
   status?: 'sent' | 'delivered' | 'read'
+  transfer_id?: string
 }
 
 export type DbGroup = {
@@ -385,6 +386,32 @@ export class VextaDatabaseManager {
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const filtered = all.filter((m) => m.id !== msgId)
     localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
+  }
+
+  /**
+   * Updates an existing placeholder message that has a matching transfer_id.
+   * Patches in the resolved URL / voiceUrl / attachment.url without creating a duplicate.
+   * Returns true if a matching placeholder was found and updated.
+   */
+  updateMessageByTransferId(
+    transferId: string,
+    patch: { url?: string; voiceUrl?: string; attachment?: any },
+  ): boolean {
+    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const all: DbMessage[] = data ? JSON.parse(data) : []
+    const idx = all.findIndex((m) => m.transfer_id === transferId)
+    if (idx < 0) return false
+    const existing = all[idx]
+    if (patch.voiceUrl) {
+      existing.voiceUrl = patch.voiceUrl
+    }
+    if (patch.attachment) {
+      existing.attachment = { ...(existing.attachment || {}), ...patch.attachment }
+    } else if (patch.url && existing.attachment) {
+      existing.attachment = { ...existing.attachment, url: patch.url }
+    }
+    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
+    return true
   }
 
   clearMessages(chatId: string) {

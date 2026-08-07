@@ -19,21 +19,38 @@ export function utf8ToBase64(str: string): string {
 }
 
 /**
+ * Returns true if the given string is plausibly valid standard base64
+ * (only base64 chars, properly padded length).
+ */
+function isValidBase64(s: string): boolean {
+  if (!s || s.length < 4) return false
+  // Must only contain base64 characters
+  if (!/^[A-Za-z0-9+/]+=*$/.test(s)) return false
+  // Length must be a multiple of 4 (base64 padding rule)
+  return s.length % 4 === 0
+}
+
+/**
  * Decodes a Base64 string into a UTF-8 string safely.
  * Prevents character corruption for non-ASCII / Unicode text.
+ * Returns the original string unchanged if it is not valid base64.
  */
 export function base64ToUtf8(b64: string): string {
   if (!b64) return ''
   try {
     const cleanB64 = b64.replace(/[^A-Za-z0-9+/=]/g, '')
-    const binary = atob(cleanB64)
+    // Pad to a multiple of 4 if needed before calling atob
+    const padded = cleanB64.padEnd(Math.ceil(cleanB64.length / 4) * 4, '=')
+    if (!padded) return b64
+    const binary = atob(padded)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i)
     }
     return new TextDecoder().decode(bytes)
   } catch (err) {
-    console.error('[Vexta Codec] base64ToUtf8 error:', err)
+    // Not valid base64 — silently return the original string
+    console.debug('[Vexta Codec] base64ToUtf8: not valid base64, returning as-is', (err as Error)?.message)
     return b64
   }
 }
@@ -80,7 +97,7 @@ export function decodePayload(input: ArrayBuffer | Uint8Array | string | any): a
 export function isControlMessage(input: string): boolean {
   if (!input) return false
 
-  // Base64 prefix signatures for JSON control packets starting with {"type":
+  // Fast path: base64 prefix signatures for JSON control packets starting with {"type":
   if (
     input.includes('eyJ0eXBlIjoicHJlc2VuY2') || // presence
     input.includes('eyJ0eXBlIjoiZmlsZV') ||     // file_chunk / file_init / file_status
@@ -90,23 +107,40 @@ export function isControlMessage(input: string): boolean {
     return true
   }
 
-  let decoded = input
-  try {
-    decoded = base64ToUtf8(input)
-  } catch {
-    decoded = input
+  // Fast path: plain JSON string check (avoids any decode attempt)
+  const lower = input.toLowerCase()
+  if (
+    lower.includes('"type":"presence"') ||
+    lower.includes('"type":"file_chunk"') ||
+    lower.includes('"type":"file_init"') ||
+    lower.includes('"type":"file_status_query"') ||
+    lower.includes('"type":"file_status_response"') ||
+    lower.includes('"type":"call_offer"') ||
+    lower.includes('"type":"call_answer"') ||
+    lower.includes('"type":"call_ice"') ||
+    lower.includes('"type":"metadata_sync"')
+  ) {
+    return true
   }
 
-  const c = decoded.toLowerCase()
-  return (
-    c.includes('"type":"presence"') ||
-    c.includes('"type":"file_chunk"') ||
-    c.includes('"type":"file_init"') ||
-    c.includes('"type":"file_status_query"') ||
-    c.includes('"type":"file_status_response"') ||
-    c.includes('"type":"call_offer"') ||
-    c.includes('"type":"call_answer"') ||
-    c.includes('"type":"call_ice"') ||
-    c.includes('"type":"metadata_sync"')
-  )
+  // Slow path: try base64 decode only if the input actually looks like valid base64
+  if (isValidBase64(input.trim())) {
+    const decoded = base64ToUtf8(input)
+    if (decoded !== input) {
+      const dc = decoded.toLowerCase()
+      return (
+        dc.includes('"type":"presence"') ||
+        dc.includes('"type":"file_chunk"') ||
+        dc.includes('"type":"file_init"') ||
+        dc.includes('"type":"file_status_query"') ||
+        dc.includes('"type":"file_status_response"') ||
+        dc.includes('"type":"call_offer"') ||
+        dc.includes('"type":"call_answer"') ||
+        dc.includes('"type":"call_ice"') ||
+        dc.includes('"type":"metadata_sync"')
+      )
+    }
+  }
+
+  return false
 }
