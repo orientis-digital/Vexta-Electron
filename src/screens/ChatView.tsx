@@ -6,23 +6,10 @@ import { base64ToUtf8, isControlMessage, utf8ToBase64 } from '../network/codec'
 import { webrtcManager } from '../network/webrtc'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
-  blobToDataURL,
-  encryptFileChunk,
-  generateFileKey,
-  saveMediaToDownloads,
-  sliceFile,
-  stripFileMetadata,
-} from '../crypto/file_transfer'
-import {
-  AttachIcon,
   CheckIcon,
   CloseIcon,
-  DownloadIcon,
-  ImageIcon,
   InfoIcon,
-  LocationIcon,
   MicIcon,
-  PeopleIcon,
   PhoneOffIcon,
   PinIcon,
   ReplyIcon,
@@ -35,16 +22,8 @@ import {
   VideoIcon,
 } from '../components/icons'
 import { MarkdownMessage } from '../components/MarkdownMessage'
-import { VoiceRecorder } from '../components/VoiceRecorder'
-import { AudioPlayer } from '../components/AudioPlayer'
-import { MediaLightbox } from '../components/MediaLightbox'
-import type { LightboxItem } from '../components/MediaLightbox'
 
 import { formatLastActive } from '../network/presence'
-
-type Attachment = { kind: 'file' | 'photo' | 'video'; name: string; size: string; url?: string }
-type AttachmentKind = Attachment['kind']
-type AttachItemKind = AttachmentKind | 'contact' | 'location'
 
 type Message = {
   id: number
@@ -52,15 +31,13 @@ type Message = {
   timestamp: string
   me: boolean
   sender?: string
-  attachment?: Attachment
-  voiceUrl?: string
-  voiceDuration?: string
   timer?: string
   reactions?: string[]
   isSystem?: boolean
   replyTo?: { sender: string; text: string }
   rawDate?: string | number
   status?: 'sent' | 'delivered' | 'read'
+  transfer_id?: string
 }
 
 const SAMPLE_MESSAGES: Message[] = []
@@ -74,19 +51,6 @@ const TIMER_OPTIONS = [
   { label: '1 day', value: '1d' },
 ] as const
 
-const ATTACH_ITEMS: {
-  kind: AttachItemKind
-  label: string
-  icon: React.ReactNode
-  soon?: boolean
-}[] = [
-  { kind: 'file', label: 'Document', icon: <AttachIcon size={15} /> },
-  { kind: 'photo', label: 'Photo', icon: <ImageIcon size={15} /> },
-  { kind: 'video', label: 'Video', icon: <VideoIcon size={15} /> },
-  { kind: 'contact', label: 'Contact', icon: <PeopleIcon size={15} />, soon: true },
-  { kind: 'location', label: 'Location', icon: <LocationIcon size={15} />, soon: true },
-] as const
-
 const EMOJI_REACTIONS = ['❤️', '👍', '🔥', '😮', '😂', '🎉']
 
 function isGroup(name: string) {
@@ -95,24 +59,6 @@ function isGroup(name: string) {
 
 function nowTimestamp() {
   return new Date().toTimeString().slice(0, 5)
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function attachmentIcon(a: Attachment) {
-  if (a.kind === 'photo') return <ImageIcon size={16} />
-  if (a.kind === 'video') return <VideoIcon size={16} />
-  return <AttachIcon size={16} />
-}
-
-function attachmentLabel(a: Attachment) {
-  if (a.kind === 'photo') return 'Image'
-  if (a.kind === 'video') return 'Video'
-  return 'Document'
 }
 
 function formatDisplayTime(ts: any): string {
@@ -207,19 +153,12 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
   const [messages, setMessages] = useState<Message[]>(SAMPLE_MESSAGES)
   const [draft, setDraft] = useState('')
-  const [attachment, setAttachment] = useState<Attachment | null>(null)
   const [timer, setTimer] = useState<string | null>(null)
-  const [menu, setMenu] = useState<'attach' | 'timer' | null>(null)
-  const [recording, setRecording] = useState(false)
-  const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null)
-  const [pendingKind, setPendingKind] = useState<Attachment['kind']>('file')
+  const [menu, setMenu] = useState<'timer' | null>(null)
 
   // UI Polish States
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [isDragging, setIsDragging] = useState(false)
-  const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<number | null>(null)
   const [activeMoreMenuMsgId, setActiveMoreMenuMsgId] = useState<number | null>(null)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
@@ -227,13 +166,11 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
   const nextId = useRef(SAMPLE_MESSAGES.length + 1)
   const listRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     setMenu(null)
     setTimer(null)
-    setRecording(false)
     setSearchOpen(false)
     setSearchQuery('')
     setReplyingTo(null)
@@ -289,20 +226,14 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         }
         return true
       })
-      const formatted: Message[] = dbMsgs.map((m, idx) => {
-        const isMediaOnly = Boolean(m.voiceUrl || m.attachment)
-        const isAutoLabel = m.ciphertext === m.attachment?.name || (m.ciphertext && m.ciphertext.startsWith('🎤 Voice note'))
-        return {
-          id: idx + 1,
-          text: (isMediaOnly && isAutoLabel) ? undefined : m.ciphertext,
-          timestamp: formatDisplayTime(m.timestamp),
-          rawDate: m.timestamp,
-          me: m.sender === activeUser,
-          sender: m.sender,
-          voiceUrl: m.voiceUrl,
-          attachment: m.attachment,
-        }
-      })
+      const formatted: Message[] = dbMsgs.map((m, idx) => ({
+        id: idx + 1,
+        text: m.ciphertext,
+        timestamp: formatDisplayTime(m.timestamp),
+        rawDate: m.timestamp,
+        me: m.sender === activeUser,
+        sender: m.sender,
+      }))
       setMessages(formatted)
 
       const handleMessagesUpdated = (e: any) => {
@@ -327,20 +258,14 @@ function ChatView({ showInfo = false }: ChatViewProps) {
             }
             return true
           })
-          const freshFormatted: Message[] = freshDbMsgs.map((m, idx) => {
-            const isMediaOnly = Boolean(m.voiceUrl || m.attachment)
-            const isAutoLabel = m.ciphertext === m.attachment?.name || (m.ciphertext && m.ciphertext.startsWith('🎤 Voice note'))
-            return {
-              id: idx + 1,
-              text: (isMediaOnly && isAutoLabel) ? undefined : m.ciphertext,
-              timestamp: formatDisplayTime(m.timestamp),
-              rawDate: m.timestamp,
-              me: m.sender === activeUser,
-              sender: m.sender,
-              voiceUrl: m.voiceUrl,
-              attachment: m.attachment,
-            }
-          })
+          const freshFormatted: Message[] = freshDbMsgs.map((m, idx) => ({
+            id: idx + 1,
+            text: m.ciphertext,
+            timestamp: formatDisplayTime(m.timestamp),
+            rawDate: m.timestamp,
+            me: m.sender === activeUser,
+            sender: m.sender,
+          }))
           setMessages(freshFormatted)
         }
       }
@@ -375,13 +300,24 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       let msgSender = msg.sender
       let displayText = text
 
+      const cleanSender = (msg.sender || '').replace(/^@/, '').toLowerCase()
+      const cleanTargetName = (name || '').replace(/^@/, '').toLowerCase()
+      const cleanTargetChatId = (chatId || '').replace(/^@/, '').toLowerCase()
+
+      const matchesTarget =
+        cleanSender === cleanTargetName ||
+        cleanSender === cleanTargetChatId ||
+        msgSender === name ||
+        msgSender === chatId ||
+        (isGroup(chatId) && inner?.group_uuid && chatId.includes(inner.group_uuid))
+
       if (inner && typeof inner === 'object') {
         if (inner.type === 'group_msg') {
           msgSender = `group_${inner.group_uuid}`
           displayText = inner.body || text
         } else if (
-          inner.type === 'file_chunk' ||
           inner.type === 'file_init' ||
+          inner.type === 'file_chunk' ||
           inner.type === 'file_status_query' ||
           inner.type === 'file_status_response' ||
           inner.type === 'presence' ||
@@ -397,13 +333,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
         return
       }
 
-      const matchesTarget =
-        msg.sender === name ||
-        msg.recipient === name ||
-        msgSender === name ||
-        msgSender === chatId ||
-        (isGroup(chatId) && inner?.group_uuid && chatId.includes(inner.group_uuid))
-
       if (matchesTarget) {
         setMessages((prev) => [
           ...prev,
@@ -412,7 +341,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
             text: displayText,
             timestamp: formatDisplayTime(msg.timestamp),
             rawDate: msg.timestamp,
-            me: msg.sender === activeUser,
+            me: cleanSender === activeUser.replace(/^@/, '').toLowerCase(),
             sender: msg.sender,
           },
         ])
@@ -430,156 +359,37 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       }
     }
     window.addEventListener('vexta_messages_cleared', handleCleared)
-    return () => window.removeEventListener('vexta_messages_cleared', handleCleared)
+    return () => {
+      window.removeEventListener('vexta_messages_cleared', handleCleared)
+    }
   }, [chatId, name])
 
-  function openPicker(kind: AttachItemKind) {
-    if (kind === 'contact' || kind === 'location') return
-    setPendingKind(kind)
-    setMenu(null)
 
-    const input = fileInputRef.current
-    if (!input) return
-
-    if (kind === 'photo') input.accept = 'image/*'
-    else if (kind === 'video') input.accept = 'video/*'
-    else input.accept = '*/*'
-
-    input.click()
-  }
-
-  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setSelectedFileObj(file)
-    setAttachment({
-      kind: pendingKind,
-      name: file.name,
-      size: formatBytes(file.size),
-      url: file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : undefined,
-    })
-
-    e.target.value = ''
-  }
-
-  // Drag & Drop File Handler
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    if (!isGlobal) setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    if (isGlobal) return
-
-    const file = e.dataTransfer.files?.[0]
-    if (!file) return
-
-    const kind: AttachmentKind = file.type.startsWith('image/')
-      ? 'photo'
-      : file.type.startsWith('video/')
-        ? 'video'
-        : 'file'
-
-    setSelectedFileObj(file)
-    setPendingKind(kind)
-    setAttachment({
-      kind,
-      name: file.name,
-      size: formatBytes(file.size),
-      url: file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : undefined,
-    })
-  }
 
   async function send() {
     const text = draft.trim()
-    if (!text && !attachment) return
+    if (!text) return
 
     const activeUser = localStorage.getItem('vexta_active_user') || ''
 
-    if (text.trim()) {
-      if (isGroup(chatId)) {
-        const db = new VextaDatabaseManager(activeUser)
-        const members = db.getGroupMembers(name)
-        bridgeClient.sendGroupMessage(name, members, text)
-      } else {
-        bridgeClient.sendBlindMessage(name, utf8ToBase64(text))
-      }
+    if (isGroup(chatId)) {
+      const db = new VextaDatabaseManager(activeUser)
+      const members = db.getGroupMembers(name)
+      bridgeClient.sendGroupMessage(name, members, text)
+    } else {
+      bridgeClient.sendBlindMessage(name, utf8ToBase64(text))
     }
 
-    let persistentAttachment = attachment
-
-    if (selectedFileObj) {
-      try {
-        const { cleanBlob, cleanFilename } = await stripFileMetadata(selectedFileObj)
-        const fileKey = generateFileKey()
-        const { chunks, fileHash } = await sliceFile(cleanBlob)
-        const transferId = `tf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
-
-        let persistentUrl: string | undefined = undefined
-        if (cleanBlob.size < 5 * 1024 * 1024) {
-          try {
-            persistentUrl = await blobToDataURL(cleanBlob)
-          } catch {
-            persistentUrl = attachment?.url
-          }
-        } else {
-          persistentUrl = attachment?.url
-        }
-
-        const ext = (cleanFilename.split('.').pop() || '').toLowerCase()
-        const isPhoto = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)
-        const isVideo = ['mp4', 'webm', 'mkv', 'mov', 'avi'].includes(ext)
-        const kind: 'file' | 'photo' | 'video' = isPhoto ? 'photo' : isVideo ? 'video' : 'file'
-
-        persistentAttachment = {
-          kind,
-          name: cleanFilename,
-          size: formatBytes(cleanBlob.size),
-          url: persistentUrl,
-        }
-
-        bridgeClient.sendFileInit(name, {
-          transfer_id: transferId,
-          filename: cleanFilename,
-          file_size: cleanBlob.size,
-          chunk_size: 128 * 1024,
-          total_chunks: chunks.length,
-          file_key: fileKey,
-          file_hash: fileHash,
-        })
-
-        for (let i = 0; i < chunks.length; i++) {
-          const encChunk = await encryptFileChunk(fileKey, chunks[i])
-          bridgeClient.sendFileChunk(name, transferId, i, encChunk)
-          if (i > 0 && i % 5 === 0) {
-            await new Promise((r) => setTimeout(r, 10))
-          }
-        }
-      } catch (err) {
-        console.warn('[Vexta File Transfer] Error encrypting/sending file:', err)
-      }
-    }
-
-    if (activeUser && (text || persistentAttachment)) {
+    if (activeUser) {
       try {
         const db = new VextaDatabaseManager(activeUser)
         db.saveMessage({
           sender: activeUser,
           recipient: name,
-          ciphertext: text || persistentAttachment?.name || 'Attachment',
+          ciphertext: text,
           timestamp: new Date().toISOString(),
           is_read: 1,
           timer: timer || undefined,
-          voiceUrl: persistentAttachment && persistentAttachment.url && (persistentAttachment.kind as string) === 'audio' ? persistentAttachment.url : undefined,
-          attachment: persistentAttachment || undefined,
         })
       } catch (e) {
         console.warn('[Vexta DB] Error saving outbound message:', e)
@@ -589,7 +399,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     const replySnippet = replyingTo
       ? {
           sender: replyingTo.me ? 'You' : replyingTo.sender || name,
-          text: replyingTo.text || replyingTo.attachment?.name || 'Attachment',
+          text: replyingTo.text || 'Message',
         }
       : undefined
 
@@ -597,19 +407,16 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       ...prev,
       {
         id: nextId.current++,
-        text: text || undefined,
+        text,
         timestamp: nowTimestamp(),
         rawDate: new Date().toISOString(),
         me: true,
-        attachment: persistentAttachment || undefined,
         timer: timer || undefined,
         replyTo: replySnippet,
       },
     ])
 
     setDraft('')
-    setAttachment(null)
-    setSelectedFileObj(null)
     setReplyingTo(null)
     window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
 
@@ -620,69 +427,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     }
   }
 
-  // Send Audio Voice Note
-  async function handleSendVoiceBlob(audioBlob: Blob) {
-    const activeUser = localStorage.getItem('vexta_active_user') || ''
-    let voiceUrl: string = ''
-    try {
-      voiceUrl = await blobToDataURL(audioBlob)
-    } catch {
-      voiceUrl = URL.createObjectURL(audioBlob)
-    }
 
-    try {
-      const fileKey = generateFileKey()
-      const { chunks, fileHash } = await sliceFile(audioBlob)
-      const transferId = `tf_voice_${Date.now()}`
-
-      bridgeClient.sendFileInit(name, {
-        transfer_id: transferId,
-        filename: `voice_${Date.now()}.webm`,
-        file_size: audioBlob.size,
-        chunk_size: 128 * 1024,
-        total_chunks: chunks.length,
-        file_key: fileKey,
-        file_hash: fileHash,
-      })
-
-      for (let i = 0; i < chunks.length; i++) {
-        const encChunk = await encryptFileChunk(fileKey, chunks[i])
-        bridgeClient.sendFileChunk(name, transferId, i, encChunk)
-        if (i > 0 && i % 5 === 0) {
-          await new Promise((r) => setTimeout(r, 10))
-        }
-      }
-
-      if (activeUser) {
-        const db = new VextaDatabaseManager(activeUser)
-        db.saveMessage({
-          sender: activeUser,
-          recipient: name,
-          ciphertext: `🎤 Voice note (${Math.round(audioBlob.size / 1024)} KB)`,
-          timestamp: new Date().toISOString(),
-          is_read: 1,
-          voiceUrl: voiceUrl,
-        })
-      }
-    } catch (err) {
-      console.warn('[Voice Send Error]', err)
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: nextId.current++,
-        timestamp: nowTimestamp(),
-        rawDate: new Date().toISOString(),
-        me: true,
-        voiceUrl,
-        timer: timer || undefined,
-      },
-    ])
-
-    setRecording(false)
-    window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
-  }
 
   function autoGrow(el: HTMLTextAreaElement) {
     el.style.height = 'auto'
@@ -740,66 +485,18 @@ function ChatView({ showInfo = false }: ChatViewProps) {
     }
   }
 
-  function openMediaLightbox(currentMsg: Message) {
-    const items: LightboxItem[] = []
-    let initialIdx = 0
-
-    const isImageFile = (name: string) => /\.(jpg|jpeg|png|gif|webp|svg|bmp|heic|avif)$/i.test(name)
-    const isVideoFile = (name: string) => /\.(mp4|webm|mkv|mov|avi)$/i.test(name)
-
-    messages.forEach((m) => {
-      if (m.attachment && (m.attachment.kind === 'photo' || m.attachment.kind === 'video' || isImageFile(m.attachment.name) || isVideoFile(m.attachment.name))) {
-        const isTarget = m.id === currentMsg.id
-        if (isTarget) initialIdx = items.length
-        items.push({
-          url: m.attachment.url || '',
-          filename: m.attachment.name,
-          type: (m.attachment.kind === 'photo' || isImageFile(m.attachment.name)) ? 'image' : 'video',
-        })
-      }
-    })
-
-    if (items.length > 0) {
-      setLightboxItems(items)
-      setLightboxIndex(initialIdx)
-    }
-  }
-
   const filteredMessages = messages.filter((m) => {
     if (!searchQuery.trim()) return true
     const q = searchQuery.toLowerCase()
-    return (
-      (m.text && m.text.toLowerCase().includes(q)) ||
-      (m.attachment && m.attachment.name.toLowerCase().includes(q))
-    )
+    return m.text ? m.text.toLowerCase().includes(q) : false
   })
 
   return (
     <div
-      className={`screen-pane chat-view ${isDragging ? 'dragging' : ''}`}
+      className="screen-pane chat-view"
       data-chat-theme={chatTheme}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
     >
       <div className="chat-main-area">
-        <input
-          ref={fileInputRef}
-        type="file"
-        style={{ display: 'none' }}
-        onChange={handleFileSelected}
-      />
-
-      {/* Drag & Drop Overlay */}
-      {isDragging && (
-        <div className="drag-overlay">
-          <div className="drag-overlay-card">
-            <AttachIcon size={32} className="accent-icon" />
-            <h3>Drop Files Here</h3>
-            <p>Files will be encrypted and sent via Vexta Zero-Knowledge Transfer</p>
-          </div>
-        </div>
-      )}
 
       {/* Reconnection Banner */}
       {bridgeStatus !== 'connected' && (
@@ -1025,21 +722,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                         )}
                       </div>
 
-                      {(m.voiceUrl || m.attachment?.url || m.attachment) && (
-                        <button
-                          type="button"
-                          className="messenger-action-btn"
-                          title="Save to Downloads/Vexta"
-                          onClick={() => {
-                            const targetUrl = m.voiceUrl || m.attachment?.url || ''
-                            const targetName = m.attachment?.name || `voice_${Date.now()}.webm`
-                            if (targetUrl) saveMediaToDownloads(targetUrl, targetName)
-                          }}
-                        >
-                          <DownloadIcon size={18} />
-                        </button>
-                      )}
-
                       <button
                         type="button"
                         className="messenger-action-btn"
@@ -1086,7 +768,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                         </div>
                       )}
 
-                      {/* Call Ended Event Card */}
+                      {/* Call Ended Event Card or Text */}
                       {m.text && m.text.startsWith('CALL_EVENT:') ? (
                         <div className="call-ended-card">
                           <div className="call-ended-icon">
@@ -1107,41 +789,8 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                             Call Back
                           </button>
                         </div>
-                      ) : m.voiceUrl ? (
-                        <AudioPlayer src={m.voiceUrl} />
                       ) : (
-                        <>
-                          {/* Attachments */}
-                          {m.attachment && (
-                            <div
-                              className={`file-card ${m.attachment.url ? 'clickable-media' : ''}`}
-                              onClick={() => m.attachment?.url && openMediaLightbox(m)}
-                            >
-                              {m.attachment.url && m.attachment.kind === 'photo' ? (
-                                <div className="photo-thumb-container">
-                                  <img
-                                    src={m.attachment.url}
-                                    alt={m.attachment.name}
-                                    className="chat-img-thumb"
-                                  />
-                                </div>
-                              ) : (
-                                <>
-                                  <span className="file-icon">{attachmentIcon(m.attachment)}</span>
-                                  <span className="file-meta">
-                                    <b>{m.attachment.name}</b>
-                                    <small>
-                                      {attachmentLabel(m.attachment)} &middot; {m.attachment.size}
-                                    </small>
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Markdown Message Content */}
-                          {m.text && <MarkdownMessage content={m.text} />}
-                        </>
+                        m.text && <MarkdownMessage content={m.text} />
                       )}
 
                       <span className="meta">
@@ -1187,21 +836,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                       >
                         <ReplyIcon size={18} />
                       </button>
-
-                      {(m.voiceUrl || m.attachment?.url || m.attachment) && (
-                        <button
-                          type="button"
-                          className="messenger-action-btn"
-                          title="Save to Downloads/Vexta"
-                          onClick={() => {
-                            const targetUrl = m.voiceUrl || m.attachment?.url || ''
-                            const targetName = m.attachment?.name || `voice_${Date.now()}.webm`
-                            if (targetUrl) saveMediaToDownloads(targetUrl, targetName)
-                          }}
-                        >
-                          <DownloadIcon size={18} />
-                        </button>
-                      )}
 
                       <div className="messenger-action-wrap">
                         <button
@@ -1278,7 +912,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
                 Replying to <b>{replyingTo.me ? 'yourself' : replyingTo.sender || name}</b>
               </span>
               <span className="reply-bar-snippet">
-                {replyingTo.text || replyingTo.attachment?.name || 'Attachment'}
+                {replyingTo.text || 'Message'}
               </span>
             </div>
             <button
@@ -1292,126 +926,61 @@ function ChatView({ showInfo = false }: ChatViewProps) {
           </div>
         )}
 
-        {attachment && (
-          <div className="attach-chip">
-            <span className="attach-chip-icon">{attachmentIcon(attachment)}</span>
-            <span className="attach-chip-meta">
-              <b>{attachment.name}</b>
-              <small>
-                {attachmentLabel(attachment)} &middot; {attachment.size}
-              </small>
-            </span>
-            <button
-              type="button"
-              className="attach-chip-x"
-              onClick={() => setAttachment(null)}
-              aria-label="Remove attachment"
-            >
-              {'\u00D7'}
-            </button>
-          </div>
-        )}
 
         <div className="composer-row">
-          {recording ? (
-            <VoiceRecorder
-              onSend={handleSendVoiceBlob}
-              onCancel={() => setRecording(false)}
-            />
-          ) : (
-            <>
-              <form
-                className="chat-input"
-                onSubmit={(e) => {
+          <form
+            className="chat-input"
+            onSubmit={(e) => {
+              e.preventDefault()
+              send()
+            }}
+          >
+            <textarea
+              ref={fieldRef}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                autoGrow(e.target)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
                   send()
-                }}
-              >
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="Attach File"
-                  disabled={isGlobal}
-                  onClick={() => setMenu(menu === 'attach' ? null : 'attach')}
-                >
-                  <AttachIcon size={18} />
-                </button>
-                <textarea
-                  ref={fieldRef}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value)
-                    autoGrow(e.target)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      send()
-                    }
-                  }}
-                  placeholder={
-                    isGlobal
-                      ? 'System channel — announcements only'
-                      : 'Type a message...'
-                  }
-                  disabled={isGlobal}
-                  rows={1}
-                  aria-label="Message"
-                />
-                <button
-                  type="button"
-                  className={`icon-btn timer-btn ${timer ? 'on' : ''}`}
-                  title="Disappearing messages"
-                  disabled={isGlobal}
-                  onClick={() => setMenu(menu === 'timer' ? null : 'timer')}
-                >
-                  <TimerIcon size={17} />
-                  {timer && <span className="timer-badge">{timer}</span>}
-                </button>
-              </form>
+                }
+              }}
+              placeholder={
+                isGlobal
+                  ? 'System channel — announcements only'
+                  : 'Type a message...'
+              }
+              disabled={isGlobal}
+              rows={1}
+              aria-label="Message"
+            />
+            <button
+              type="button"
+              className={`icon-btn timer-btn ${timer ? 'on' : ''}`}
+              title="Disappearing messages"
+              disabled={isGlobal}
+              onClick={() => setMenu(menu === 'timer' ? null : 'timer')}
+            >
+              <TimerIcon size={17} />
+              {timer && <span className="timer-badge">{timer}</span>}
+            </button>
+          </form>
 
-              <div className="composer-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="Record Voice Note"
-                  disabled={isGlobal}
-                  onClick={() => setRecording(true)}
-                >
-                  <MicIcon size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="send-btn"
-                  title="Send message"
-                  disabled={isGlobal || (!draft.trim() && !attachment)}
-                  onClick={send}
-                >
-                  <SendIcon size={16} />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Attachment Menu */}
-        {menu === 'attach' && (
-          <div className="popover attach-menu">
-            {ATTACH_ITEMS.map((item) => (
-              <button
-                key={item.kind}
-                type="button"
-                className={`attach-item ${item.soon ? 'soon' : ''}`}
-                disabled={item.soon}
-                onClick={() => openPicker(item.kind)}
-              >
-                <span className="icon">{item.icon}</span>
-                <span className="label">{item.label}</span>
-                {item.soon && <span className="tag">Soon</span>}
-              </button>
-            ))}
+          <div className="composer-actions">
+            <button
+              type="button"
+              className="send-btn"
+              title="Send message"
+              disabled={isGlobal || !draft.trim()}
+              onClick={send}
+            >
+              <SendIcon size={16} />
+            </button>
           </div>
-        )}
+        </div>
 
         {/* Disappearing Messages Timer Menu */}
         {menu === 'timer' && (
@@ -1445,15 +1014,6 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       <aside className={`chat-info-drawer ${infoOpen ? 'open' : ''}`}>
         {infoOpen && <ChatInfoView onClose={toggleInfo} />}
       </aside>
-
-      {/* Full-Screen Media Lightbox Overlay */}
-      {lightboxIndex !== null && (
-        <MediaLightbox
-          items={lightboxItems}
-          initialIndex={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-        />
-      )}
     </div>
   )
 }

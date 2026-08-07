@@ -328,7 +328,7 @@ class IndexedDBCache {
         return
       }
       const req = indexedDB.open('VextaMediaCacheDB', 2)
-      req.onupgradeneeded = (e) => {
+      req.onupgradeneeded = () => {
         const db = req.result
         if (!db.objectStoreNames.contains('chunks')) {
           db.createObjectStore('chunks')
@@ -346,24 +346,30 @@ class IndexedDBCache {
   async saveChunk(transferId: string, chunkIndex: number, data: string): Promise<number> {
     try {
       const db = await this.getDB()
-      const tx = db.transaction('chunks', 'readwrite')
-      const store = tx.objectStore('chunks')
-      await new Promise<void>((resolve, reject) => {
-        const req = store.put(data, `${transferId}_${chunkIndex}`)
-        req.onsuccess = () => resolve()
-        req.onerror = () => reject(req.error)
-      })
+      // Use a single transaction for both the put AND the count so the
+      // transaction does not auto-commit between the two async operations.
+      return await new Promise<number>((resolve, reject) => {
+        const tx = db.transaction('chunks', 'readwrite')
+        const store = tx.objectStore('chunks')
+        let savedCount = 0
 
-      const countReq = store.getAllKeys()
-      const savedCount = await new Promise<number>((resolve) => {
-        countReq.onsuccess = () => {
-          const keys = countReq.result as string[]
-          const matching = keys.filter((k) => k.startsWith(`${transferId}_`))
-          resolve(matching.length)
+        const putReq = store.put(data, `${transferId}_${chunkIndex}`)
+        putReq.onerror = () => reject(putReq.error)
+
+        putReq.onsuccess = () => {
+          // Still inside the same active transaction – safe to issue another request
+          const countReq = store.getAllKeys()
+          countReq.onsuccess = () => {
+            const keys = countReq.result as string[]
+            savedCount = keys.filter((k) => k.startsWith(`${transferId}_`)).length
+          }
+          countReq.onerror = () => { savedCount = 0 }
         }
-        countReq.onerror = () => resolve(0)
+
+        tx.oncomplete = () => resolve(savedCount)
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(new Error('Transaction aborted'))
       })
-      return savedCount
     } catch (err) {
       console.warn('[IndexedDB] Save chunk error:', err)
       return 0

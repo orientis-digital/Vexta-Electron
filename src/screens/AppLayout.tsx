@@ -70,7 +70,10 @@ function loadUserContacts(): Contact[] {
   if (!activeUser) return []
   const db = new VextaDatabaseManager(activeUser)
 
-  const directContacts = db.getContacts().map((c) => {
+  const directContacts = db
+    .getContacts()
+    .filter((c) => c.status !== 'pending')
+    .map((c) => {
     const msgs = db.getMessages(c.username)
     const lastMsg = msgs[msgs.length - 1]
     const lastTs = lastMsg && lastMsg.timestamp ? (typeof lastMsg.timestamp === 'number' ? lastMsg.timestamp : new Date(lastMsg.timestamp).getTime()) : 0

@@ -123,9 +123,18 @@ function FriendsView() {
       setFriends(mapped)
     })
 
+    const handleServerError = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message?: string }>
+      if (customEvent.detail?.message) {
+        showToast(customEvent.detail.message)
+      }
+    }
+    window.addEventListener('vexta_server_error', handleServerError)
+
     return () => {
       unsubRequests()
       unsubFriends()
+      window.removeEventListener('vexta_server_error', handleServerError)
     }
   }, [])
 
@@ -139,10 +148,10 @@ function FriendsView() {
     setFriends((prev) => [
       ...prev,
       {
-        id: Date.now().toString(),
+        id,
         name,
         handle: `@${name.toLowerCase()}`,
-        fingerprint: '3C4D : 5E6F : 7A8B : 91B2',
+        fingerprint: '7F3A : 91B2 : C4E5 : 7091',
         status: 'online',
         online: true,
       },
@@ -152,23 +161,27 @@ function FriendsView() {
       const db = new VextaDatabaseManager(activeUser)
       db.addContact({
         username: name,
-        public_key: 'ACTIVE_KEY',
+        public_key: 'PENDING_KEY',
         display_name: name,
         created_at: new Date().toISOString(),
         status: 'active',
       })
       bridgeClient.acceptFriendRequest(id)
-      window.dispatchEvent(new CustomEvent('vexta_contact_added', { detail: { name } }))
       window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
     }
     showToast(`Accepted friend request from ${name}`)
   }
 
-  function declineRequest(id: string, name: string) {
+  function rejectRequest(id: string, name: string) {
     setPendingRequests((prev) => prev.filter((r) => r.id !== id))
-    bridgeClient.rejectFriendRequest(id)
-    window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
-    showToast(`Declined request from ${name}`)
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (activeUser) {
+      const db = new VextaDatabaseManager(activeUser)
+      db.removeContact(name)
+      bridgeClient.rejectFriendRequest(id)
+      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+    }
+    showToast(`Rejected friend request from ${name}`)
   }
 
   function removeFriend(id: string, name: string) {
@@ -191,6 +204,13 @@ function FriendsView() {
 
     const activeUser = localStorage.getItem('vexta_active_user')
     if (activeUser) {
+      const normTrimmed = trimmed.replace(/^@/, '').toLowerCase()
+      const normActive = activeUser.replace(/^@/, '').toLowerCase()
+      if (normTrimmed === normActive) {
+        showToast('Cannot send friend request to yourself')
+        return
+      }
+
       const db = new VextaDatabaseManager(activeUser)
       db.addContact({
         username: trimmed,
