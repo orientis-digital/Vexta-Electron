@@ -294,10 +294,97 @@ export class VextaBridgeClient {
       // Keep-alive heartbeat ack from relay server
     } else if (payload.type === 'FRIEND_REQUESTS_LIST') {
       console.log(`[Vexta WSS] Received FRIEND_REQUESTS_LIST:`, payload.requests)
-      this.friendRequestsListeners.forEach((fn) => fn(payload.requests || []))
+      const reqs = payload.requests || []
+      const activeUser = localStorage.getItem('vexta_active_user')
+      if (activeUser) {
+        try {
+          const db = new VextaDatabaseManager(activeUser)
+          const localContacts = db.getContacts()
+
+          // 1. Sync pending requests to local DB
+          reqs.forEach((req: any) => {
+            const normRecipient = (req.recipient || '').replace(/^@/, '').toLowerCase()
+            const normActiveUser = activeUser.replace(/^@/, '').toLowerCase()
+            const isIncoming = normRecipient === normActiveUser
+            const otherUser = isIncoming ? req.sender : req.recipient
+            const cleanOtherUser = (otherUser || '').replace(/^@/, '').toLowerCase()
+            const existing = localContacts.find((c) => (c.username || '').replace(/^@/, '').toLowerCase() === cleanOtherUser)
+            const dir = isIncoming ? 'incoming' as const : 'outgoing' as const
+            if (!existing) {
+              db.addContact({
+                username: (otherUser || '').replace(/^@/, ''),
+                public_key: 'PENDING_KEY',
+                display_name: (otherUser || '').replace(/^@/, ''),
+                created_at: new Date().toISOString(),
+                status: 'pending',
+                direction: dir,
+              })
+            } else if (existing.status === 'pending' && existing.direction !== dir) {
+              db.addContact({
+                ...existing,
+                direction: dir,
+              })
+            }
+          })
+
+          // 2. Clean up any local pending contact that is no longer in the server's pending list
+          const serverPendingUsers = reqs.map((req: any) => {
+            const normRecipient = (req.recipient || '').replace(/^@/, '').toLowerCase()
+            const normActiveUser = activeUser.replace(/^@/, '').toLowerCase()
+            const isIncoming = normRecipient === normActiveUser
+            const otherUser = isIncoming ? req.sender : req.recipient
+            return (otherUser || '').replace(/^@/, '').toLowerCase()
+          })
+
+          localContacts.forEach((c) => {
+            if (c.status === 'pending') {
+              const cleanContactName = (c.username || '').replace(/^@/, '').toLowerCase()
+              if (!serverPendingUsers.includes(cleanContactName)) {
+                db.removeContact(c.username)
+              }
+            }
+          })
+        } catch (e) {
+          console.error('[Vexta WSS] Failed to sync local contacts on FRIEND_REQUESTS_LIST:', e)
+        }
+      }
+
+      this.friendRequestsListeners.forEach((fn) => fn(reqs))
+      appEvents.emit('requests_updated', { requests: reqs })
+      appEvents.emit('contacts_reloaded', {})
     } else if (payload.type === 'FRIENDS_LIST') {
       console.log(`[Vexta WSS] Received FRIENDS_LIST:`, payload.friends)
-      this.friendsListeners.forEach((fn) => fn(payload.friends || []))
+      const friends = payload.friends || []
+      const activeUser = localStorage.getItem('vexta_active_user')
+      if (activeUser) {
+        try {
+          const db = new VextaDatabaseManager(activeUser)
+          const localContacts = db.getContacts()
+          friends.forEach((friendName: string) => {
+            const cleanFriend = (friendName || '').replace(/^@/, '').toLowerCase()
+            const existing = localContacts.find((c) => (c.username || '').replace(/^@/, '').toLowerCase() === cleanFriend)
+            if (!existing) {
+              db.addContact({
+                username: (friendName || '').replace(/^@/, ''),
+                public_key: 'UNKNOWN_KEY',
+                display_name: (friendName || '').replace(/^@/, ''),
+                created_at: new Date().toISOString(),
+                status: 'active',
+              })
+            } else if (existing.status !== 'active') {
+              db.addContact({
+                ...existing,
+                status: 'active',
+              })
+            }
+          })
+        } catch (e) {
+          console.error('[Vexta WSS] Failed to sync friends to local contacts:', e)
+        }
+      }
+      this.friendsListeners.forEach((fn) => fn(friends))
+      appEvents.emit('friends_updated', { friends })
+      appEvents.emit('contacts_reloaded', {})
     } else if (payload.type === 'FRIEND_REQUEST_SENT') {
       console.log(`[Vexta WSS] FRIEND_REQUEST_SENT confirmed for:`, payload.recipient)
       this.listFriendRequests()
@@ -933,12 +1020,22 @@ export class VextaBridgeClient {
 
   acceptFriendRequest(requestId: string | number) {
     const numericId = typeof requestId === 'number' ? requestId : parseInt(String(requestId), 10)
-    this.sendJson({ type: 'ACCEPT_FRIEND_REQUEST', request_id: isNaN(numericId) ? requestId : numericId })
+    if (!isNaN(numericId)) {
+      this.sendJson({ type: 'ACCEPT_FRIEND_REQUEST', request_id: numericId, id: numericId })
+    } else {
+      const cleanUser = String(requestId).replace(/^@/, '').trim()
+      this.sendJson({ type: 'ACCEPT_FRIEND_REQUEST', request_id: cleanUser, username: cleanUser })
+    }
   }
 
   rejectFriendRequest(requestId: string | number) {
     const numericId = typeof requestId === 'number' ? requestId : parseInt(String(requestId), 10)
-    this.sendJson({ type: 'REJECT_FRIEND_REQUEST', request_id: isNaN(numericId) ? requestId : numericId })
+    if (!isNaN(numericId)) {
+      this.sendJson({ type: 'REJECT_FRIEND_REQUEST', request_id: numericId, id: numericId })
+    } else {
+      const cleanUser = String(requestId).replace(/^@/, '').trim()
+      this.sendJson({ type: 'REJECT_FRIEND_REQUEST', request_id: cleanUser, username: cleanUser })
+    }
   }
 
   listFriends() {
@@ -998,7 +1095,7 @@ export class VextaBridgeClient {
 
   private sendJson(obj: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(encodePayload(obj))
+      this.ws.send(JSON.stringify(obj))
     }
   }
 
