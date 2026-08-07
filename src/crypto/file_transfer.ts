@@ -226,11 +226,31 @@ export async function cacheReceivedMedia(
     }
   }
 
-  // Browser fallback: store as blob URL (volatile, lost on reload)
+  // Browser fallback: store as DataURL if under 5MB for reload persistence
   const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '.bin'
   const uid = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6)
   const dateStr = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)
   const cachedFilename = `vx_${uid}_${dateStr}${ext}`
+
+  if (blob.size < 5 * 1024 * 1024) {
+    try {
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.readAsDataURL(blob)
+      })
+      return { cachedUrl: dataUrl, cachedFilename }
+    } catch {
+      // Fallback to object URL if DataURL conversion fails
+    }
+  } else {
+    try {
+      await indexedDbCache.saveMediaBlob(cachedFilename, blob)
+    } catch (e) {
+      console.warn('[Vexta Media Cache] IndexedDB Blob save failed:', e)
+    }
+  }
+
   const cachedUrl = URL.createObjectURL(blob)
   return { cachedUrl, cachedFilename }
 }
@@ -287,4 +307,126 @@ export async function saveMediaToDownloads(
     return { success: false }
   }
 }
+
+export function blobToDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+class IndexedDBCache {
+  private dbPromise: Promise<IDBDatabase> | null = null
+
+  private getDB(): Promise<IDBDatabase> {
+    if (this.dbPromise) return this.dbPromise
+    this.dbPromise = new Promise((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') {
+        reject(new Error('IndexedDB not supported'))
+        return
+      }
+      const req = indexedDB.open('VextaMediaCacheDB', 2)
+      req.onupgradeneeded = (e) => {
+        const db = req.result
+        if (!db.objectStoreNames.contains('chunks')) {
+          db.createObjectStore('chunks')
+        }
+        if (!db.objectStoreNames.contains('media_blobs')) {
+          db.createObjectStore('media_blobs')
+        }
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    return this.dbPromise
+  }
+
+  async saveChunk(transferId: string, chunkIndex: number, data: string): Promise<number> {
+    try {
+      const db = await this.getDB()
+      const tx = db.transaction('chunks', 'readwrite')
+      const store = tx.objectStore('chunks')
+      await new Promise<void>((resolve, reject) => {
+        const req = store.put(data, `${transferId}_${chunkIndex}`)
+        req.onsuccess = () => resolve()
+        req.onerror = () => reject(req.error)
+      })
+
+      const countReq = store.getAllKeys()
+      const savedCount = await new Promise<number>((resolve) => {
+        countReq.onsuccess = () => {
+          const keys = countReq.result as string[]
+          const matching = keys.filter((k) => k.startsWith(`${transferId}_`))
+          resolve(matching.length)
+        }
+        countReq.onerror = () => resolve(0)
+      })
+      return savedCount
+    } catch (err) {
+      console.warn('[IndexedDB] Save chunk error:', err)
+      return 0
+    }
+  }
+
+  async getChunks(transferId: string, totalChunks: number): Promise<(string | undefined)[]> {
+    try {
+      const db = await this.getDB()
+      const tx = db.transaction('chunks', 'readonly')
+      const store = tx.objectStore('chunks')
+      const result: (string | undefined)[] = []
+      for (let i = 0; i < totalChunks; i++) {
+        const val = await new Promise<string | undefined>((res) => {
+          const req = store.get(`${transferId}_${i}`)
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => res(undefined)
+        })
+        result[i] = val
+      }
+      return result
+    } catch {
+      return []
+    }
+  }
+
+  async clearChunks(transferId: string, totalChunks: number): Promise<void> {
+    try {
+      const db = await this.getDB()
+      const tx = db.transaction('chunks', 'readwrite')
+      const store = tx.objectStore('chunks')
+      for (let i = 0; i < totalChunks; i++) {
+        store.delete(`${transferId}_${i}`)
+      }
+    } catch {}
+  }
+
+  async saveMediaBlob(filename: string, blob: Blob): Promise<void> {
+    try {
+      const db = await this.getDB()
+      const tx = db.transaction('media_blobs', 'readwrite')
+      const store = tx.objectStore('media_blobs')
+      store.put(blob, filename)
+    } catch (err) {
+      console.warn('[IndexedDB] Save media blob error:', err)
+    }
+  }
+
+  async getMediaBlob(filename: string): Promise<Blob | undefined> {
+    try {
+      const db = await this.getDB()
+      const tx = db.transaction('media_blobs', 'readonly')
+      const store = tx.objectStore('media_blobs')
+      return new Promise<Blob | undefined>((resolve) => {
+        const req = store.get(filename)
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => resolve(undefined)
+      })
+    } catch {
+      return undefined
+    }
+  }
+}
+
+export const indexedDbCache = new IndexedDBCache()
 

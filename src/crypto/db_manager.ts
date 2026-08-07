@@ -306,28 +306,77 @@ export class VextaDatabaseManager {
   getMessages(chatId: string): DbMessage[] {
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
+    const cleanId = (chatId || '').trim().replace(/^group_/, '').replace(/^@/, '').toLowerCase()
+    const isGroupChat = chatId.startsWith('group_')
+
     return all.filter((m) => {
-      if (!m || !m.ciphertext) return false
+      if (!m || (!m.ciphertext && !m.attachment && !m.voiceUrl)) return false
+      if (m.ciphertext && !m.ciphertext.trim() && !m.attachment && !m.voiceUrl) return false
       if (isControlMessage(m.ciphertext)) return false
-      return (
-        m.sender === chatId ||
-        m.recipient === chatId ||
-        m.recipient === `group_${chatId}` ||
-        m.sender === `group_${chatId}`
-      )
+
+      const cleanSender = (m.sender || '').trim().replace(/^group_/, '').replace(/^@/, '').toLowerCase()
+      const cleanRecipient = (m.recipient || '').trim().replace(/^group_/, '').replace(/^@/, '').toLowerCase()
+
+      if (isGroupChat) {
+        return (
+          (m.sender || '').trim().replace(/^@/, '').toLowerCase() === `group_${cleanId}` ||
+          (m.recipient || '').trim().replace(/^@/, '').toLowerCase() === `group_${cleanId}` ||
+          cleanSender === cleanId ||
+          cleanRecipient === cleanId
+        )
+      }
+
+      return cleanSender === cleanId || cleanRecipient === cleanId
     })
   }
 
   saveMessage(msg: DbMessage) {
-    if (!msg || !msg.ciphertext) return
-    if (isControlMessage(msg.ciphertext)) {
+    if (!msg || (!msg.ciphertext && !msg.attachment && !msg.voiceUrl)) return
+    if (msg.ciphertext && isControlMessage(msg.ciphertext)) {
       return // Ignore control / signaling packets
     }
 
     const data = localStorage.getItem(`${this.storageKey}_messages`)
     const all: DbMessage[] = data ? JSON.parse(data) : []
-    msg.id = all.length + 1
-    all.push(msg)
+    const cleanSender = (msg.sender || '').trim().replace(/^@/, '')
+    const cleanRecipient = (msg.recipient || '').trim().replace(/^@/, '')
+
+    // Check if an existing pending placeholder message exists for this attachment/filename
+    const existingIndex = all.findIndex((m) => {
+      if (msg.id && m.id === msg.id) return true
+
+      const sameSender = (m.sender || '').trim().replace(/^@/, '').toLowerCase() === cleanSender.toLowerCase()
+      const sameRecipient = (m.recipient || '').trim().replace(/^@/, '').toLowerCase() === cleanRecipient.toLowerCase()
+      if (!sameSender || !sameRecipient) return false
+
+      // Only match placeholders that haven't been completed yet (no attachment.url or voiceUrl)
+      const isPendingPlaceholder = !m.voiceUrl && (!m.attachment || !m.attachment.url)
+      if (!isPendingPlaceholder) return false
+
+      if (msg.attachment?.name && m.attachment?.name === msg.attachment.name) return true
+      if (msg.ciphertext && m.ciphertext === msg.ciphertext && (m.attachment || m.voiceUrl || msg.attachment || msg.voiceUrl)) return true
+      return false
+    })
+
+    if (existingIndex >= 0) {
+      all[existingIndex] = {
+        ...all[existingIndex],
+        ...msg,
+        sender: cleanSender,
+        recipient: cleanRecipient,
+        attachment: msg.attachment || all[existingIndex].attachment,
+        voiceUrl: msg.voiceUrl || all[existingIndex].voiceUrl,
+      }
+    } else {
+      const normalizedMsg: DbMessage = {
+        ...msg,
+        sender: cleanSender,
+        recipient: cleanRecipient,
+        id: all.length + 1,
+      }
+      all.push(normalizedMsg)
+    }
+
     localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
   }
 
