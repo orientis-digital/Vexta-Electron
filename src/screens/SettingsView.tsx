@@ -367,10 +367,21 @@ function SettingsView() {
   }
 
   // ── About & Auto-Update State ─────────────────────────────
+  const [appVersion, setAppVersion] = useState('0.0.0.5')
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
   const [updateProgress, setUpdateProgress] = useState<number>(0)
   const [updateDownloaded, setUpdateDownloaded] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).vextaNative?.getSystemInfo) {
+      (window as any).vextaNative.getSystemInfo().then((info: any) => {
+        if (info && info.appVersion) {
+          setAppVersion(info.appVersion)
+        }
+      }).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).vextaNative?.onUpdateStatus) {
@@ -380,7 +391,7 @@ function SettingsView() {
           setUpdateStatus('Checking for latest Vexta release...')
         } else if (data.status === 'available') {
           setCheckingUpdates(true)
-          setUpdateStatus(`New release ${data.version} found. Downloading update...`)
+          setUpdateStatus(`New release v${data.version} found. Downloading update...`)
         } else if (data.status === 'downloading') {
           setCheckingUpdates(true)
           setUpdateProgress(data.progress || 0)
@@ -391,14 +402,14 @@ function SettingsView() {
           setUpdateStatus(`Vexta v${data.version} update ready to install!`)
         } else if (data.status === 'up_to_date') {
           setCheckingUpdates(false)
-          setUpdateStatus(`Vexta is up to date (v${data.version || '2.4.0-electron'})`)
+          setUpdateStatus(`Vexta is up to date (v${data.version || appVersion})`)
         } else if (data.status === 'error') {
           setCheckingUpdates(false)
           setUpdateStatus(`Update check failed: ${data.error || 'Network error'}`)
         }
       })
     }
-  }, [])
+  }, [appVersion])
 
   function handleCheckUpdates() {
     setCheckingUpdates(true)
@@ -1164,7 +1175,7 @@ function SettingsView() {
               <div className="spec-grid">
                 <div className="spec-item">
                   <span className="spec-label">Version</span>
-                  <span className="spec-value">v2.4.0-electron</span>
+                  <span className="spec-value">v{appVersion}</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Build</span>
