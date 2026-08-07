@@ -12,12 +12,39 @@ try {
   // Ignore if called before app ready on certain platforms
 }
 
-// Strict Single Instance Lock (Security First)
-const gotTheLock = app.requestSingleInstanceLock()
+// Dynamic Single Instance Lock & Smart Instance Replacement
+const currentVersion = app.getVersion() || '0.0.0.0'
+
+const gotTheLock = app.requestSingleInstanceLock({ version: currentVersion, pid: process.pid })
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, _commandLine, _workingDirectory, additionalData) => {
+    const incomingVersion = additionalData && additionalData.version ? additionalData.version : null
+    
+    // Compare versions helper
+    function isNewerVersion(newerVer, olderVer) {
+      if (!newerVer || !olderVer) return false
+      const v1 = String(newerVer).replace(/^v/i, '').split('.').map(Number)
+      const v2 = String(olderVer).replace(/^v/i, '').split('.').map(Number)
+      const maxLen = Math.max(v1.length, v2.length)
+      for (let i = 0; i < maxLen; i++) {
+        const num1 = v1[i] || 0
+        const num2 = v2[i] || 0
+        if (num1 > num2) return true
+        if (num1 < num2) return false
+      }
+      return false
+    }
+
+    if (incomingVersion && isNewerVersion(incomingVersion, currentVersion)) {
+      console.log(`[Vexta Main] Newer instance (v${incomingVersion}) launched. Terminating current instance (v${currentVersion})...`)
+      app.isQuitting = true
+      app.quit()
+      return
+    }
+
+    // Default behavior for same or older version: focus existing window
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.show()
