@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-deplodepimport {
+import {
   CopyIcon,
     DatabaseIcon,
     DesktopIcon,
@@ -87,6 +87,10 @@ function SettingsView() {
   const [hideNotifications, setHideNotifications] = useState(() => {
     const val = localStorage.getItem('vx_setting_hide_notifications')
     return val !== null ? val === 'true' : false
+  })
+  const [notificationSounds, setNotificationSounds] = useState(() => {
+    const val = localStorage.getItem('vx_setting_notification_sounds')
+    return val !== null ? val === 'true' : true
   })
   const [globalPresencePrivacy, setGlobalPresencePrivacy] = useState<'everyone' | 'nobody'>('everyone')
 
@@ -679,6 +683,24 @@ function SettingsView() {
                       setHideNotifications(val)
                       localStorage.setItem('vx_setting_hide_notifications', String(val))
                       showToast('Notification privacy updated')
+                    }}
+                  />
+                </div>
+
+                <div className="toggle-item">
+                  <div className="toggle-info">
+                    <span className="toggle-title">Play Notification Sounds</span>
+                    <span className="toggle-desc">Play a subtle double chime sound when a new message is received.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="toggle-switch"
+                    checked={notificationSounds}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setNotificationSounds(val)
+                      localStorage.setItem('vx_setting_notification_sounds', String(val))
+                      showToast(val ? 'Notification sounds enabled' : 'Notification sounds disabled')
                     }}
                   />
                 </div>
