@@ -5,7 +5,7 @@
  */
 
 import { bridgeClient, cleanDecodePayload } from './bridge'
-import { utf8ToBase64 } from './codec'
+import { base64ToUtf8, utf8ToBase64 } from './codec'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 
 export type CallStatus = 'idle' | 'incoming' | 'calling' | 'active' | 'ended'
@@ -33,10 +33,7 @@ export type WebRTCState = {
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.services.mozilla.com' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
   ],
 }
 
@@ -64,7 +61,7 @@ class WebRTCManager {
     this.callTimeoutTimer = setTimeout(() => {
       if (this.state.status === 'calling' || this.state.status === 'incoming') {
         console.warn('[WebRTC] 30-second ring timeout reached. Terminating call...')
-        this.endCall()
+        this.endCall('timeout')
       }
     }, 30000)
   }
@@ -79,16 +76,28 @@ class WebRTCManager {
   constructor() {
     // Register signaling listeners with Bridge
     bridgeClient.subscribeMessages((msg) => {
-      const payload = cleanDecodePayload(msg.wire_blob || msg.ciphertext || (msg as any).body || '')
+      if (!msg.sender) return
+      const rawInput = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
+      let text = rawInput
+      try {
+        if (msg.wire_blob) text = base64ToUtf8(msg.wire_blob)
+        else if (msg.ciphertext) text = base64ToUtf8(msg.ciphertext)
+        else if ((msg as any).body) text = base64ToUtf8((msg as any).body)
+      } catch {
+        text = rawInput
+      }
+
+      const payload = cleanDecodePayload(text) || cleanDecodePayload(rawInput)
       if (payload && typeof payload === 'object') {
+        const cleanSender = (msg.sender || '').replace(/^@/, '')
         if (payload.type === 'call_offer') {
-          this.handleInboundOffer(msg.sender, payload.sdp, payload.is_group, payload.is_video)
+          this.handleInboundOffer(cleanSender, payload.sdp, payload.is_group, payload.is_video)
         } else if (payload.type === 'call_answer') {
-          this.handleInboundAnswer(msg.sender, payload.sdp)
+          this.handleInboundAnswer(cleanSender, payload.sdp)
         } else if (payload.type === 'call_ice') {
-          this.handleInboundIce(msg.sender, payload.candidate)
+          this.handleInboundIce(cleanSender, payload.candidate)
         } else if (payload.type === 'call_end') {
-          this.handleInboundEnd(msg.sender)
+          this.handleInboundEnd(cleanSender, payload.reason)
         }
       }
     })
@@ -114,8 +123,12 @@ class WebRTCManager {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: isVideo ? { width: 1280, height: 720 } : false,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: isVideo ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { max: 30 } } : false,
       })
 
       this.state = {
@@ -231,8 +244,12 @@ class WebRTCManager {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: useVideo ? { width: 1280, height: 720 } : false,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: useVideo ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { max: 30 } } : false,
       })
 
       this.state.localStream = stream
@@ -297,6 +314,7 @@ class WebRTCManager {
   }
 
   private async handleInboundIce(sender: string, candidate: any) {
+    if (!candidate || !candidate.candidate) return
     const pc = this.peerConnections.get(sender)
     if (pc && pc.remoteDescription && candidate) {
       try {
@@ -328,13 +346,41 @@ class WebRTCManager {
     }
   }
 
-  private handleInboundEnd(sender: string) {
+  private handleInboundEnd(sender: string, reason?: string) {
     const pc = this.peerConnections.get(sender)
     if (pc) {
       pc.close()
       this.peerConnections.delete(sender)
     }
     this.removeRemoteStream(sender)
+
+    const activeUser = localStorage.getItem('vexta_active_user') || ''
+    const currentStatus = this.state.status
+
+    if (activeUser && sender) {
+      try {
+        const db = new VextaDatabaseManager(activeUser)
+        let logText = 'Call Ended'
+        if (reason === 'declined' || currentStatus === 'calling') {
+          logText = 'Call Declined'
+        } else if (reason === 'timeout' || currentStatus === 'incoming') {
+          logText = 'Missed Call'
+        }
+
+        db.saveMessage({
+          sender,
+          recipient: activeUser,
+          ciphertext: `CALL_EVENT:${logText}`,
+          timestamp: new Date().toISOString(),
+          is_read: 0,
+        })
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: sender } }))
+        }
+      } catch (e) {
+        console.warn('[Vexta WebRTC] Error saving inbound call end log:', e)
+      }
+    }
 
     if (this.state.status === 'incoming' || this.state.status === 'calling' || this.peerConnections.size === 0) {
       this.peerConnections.forEach((p) => p.close())
@@ -451,23 +497,30 @@ class WebRTCManager {
     return this.state.isPopout
   }
 
-  endCall() {
+  endCall(reason?: string) {
     this.clearCallTimeout()
     const target = this.state.target || this.state.caller
+    const currentStatus = this.state.status
+
     if (target) {
+      const callReason = reason || (currentStatus === 'incoming' ? 'declined' : 'ended')
       bridgeClient.sendBlindMessage(
         target,
-        btoa(JSON.stringify({ type: 'call_end' })),
+        utf8ToBase64(JSON.stringify({ type: 'call_end', reason: callReason })),
       )
 
       const activeUser = localStorage.getItem('vexta_active_user') || ''
       if (activeUser) {
         try {
           const db = new VextaDatabaseManager(activeUser)
+          let logText = 'Call Ended'
+          if (currentStatus === 'incoming') logText = 'Declined Call'
+          else if (currentStatus === 'calling' && reason === 'timeout') logText = 'Missed Call'
+
           db.saveMessage({
             sender: activeUser,
             recipient: target,
-            ciphertext: 'CALL_EVENT:Call Ended',
+            ciphertext: `CALL_EVENT:${logText}`,
             timestamp: new Date().toISOString(),
             is_read: 1,
           })

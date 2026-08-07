@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { BridgeStatus } from '../network/bridge'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
-import { base64ToUtf8 } from '../network/codec'
+import { base64ToUtf8, isControlMessage } from '../network/codec'
 import { AuthSession } from '../crypto/session'
 import {
   ChatPlusIcon,
@@ -283,7 +283,6 @@ function AppLayout() {
     const unsubMsg = bridgeClient.subscribeMessages((msg) => {
       if (msg.sender) {
         const rawInput = msg.wire_blob || msg.ciphertext || (msg as any).body || ''
-        const inner = cleanDecodePayload(rawInput)
         let snippet = rawInput
         try {
           if (msg.wire_blob) snippet = base64ToUtf8(msg.wire_blob)
@@ -291,6 +290,8 @@ function AppLayout() {
         } catch {
           snippet = rawInput
         }
+
+        const inner = cleanDecodePayload(snippet) || cleanDecodePayload(rawInput)
 
         let targetName = msg.sender
 
@@ -313,14 +314,9 @@ function AppLayout() {
             targetName = inner.group_uuid || msg.sender
             snippet = inner.body || snippet
           }
-        } else if (
-          snippet.includes('call_offer') ||
-          snippet.includes('call_answer') ||
-          snippet.includes('call_ice') ||
-          snippet.includes('call_end') ||
-          snippet.includes('file_init') ||
-          snippet.includes('eyJ0eXBlIjoiY2Fsb')
-        ) {
+        }
+
+        if (isControlMessage(snippet) || isControlMessage(rawInput)) {
           return
         }
 

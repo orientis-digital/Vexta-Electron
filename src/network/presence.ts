@@ -19,7 +19,7 @@ export function formatLastActive(lastActiveIso: string | null | undefined): stri
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
 
-    if (diffMins < 3) {
+    if (diffMins < 5) {
       return '● Active now'
     }
     if (diffMins < 60) {

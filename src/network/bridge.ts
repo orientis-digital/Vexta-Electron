@@ -6,7 +6,7 @@ import {
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbFileTransfer } from '../crypto/db_manager'
 import { cacheReceivedMedia, decryptFileChunk } from '../crypto/file_transfer'
-import { decodePayload, utf8ToBase64 } from './codec'
+import { decodePayload, isControlMessage, utf8ToBase64 } from './codec'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -451,16 +451,16 @@ export class VextaBridgeClient {
         try {
           const db = new VextaDatabaseManager(activeUser)
           const rawInput = payload.wire_blob || payload.ciphertext || payload.body || ''
-          const innerPayload = cleanDecodePayload(rawInput)
-
           let text = rawInput
           try {
-            if (payload.wire_blob) text = atob(payload.wire_blob.replace(/[^A-Za-z0-9+/=]/g, ''))
-            else if (payload.ciphertext) text = atob(payload.ciphertext.replace(/[^A-Za-z0-9+/=]/g, ''))
-            else if (payload.body) text = atob(payload.body.replace(/[^A-Za-z0-9+/=]/g, ''))
+            if (payload.wire_blob) text = base64ToUtf8(payload.wire_blob)
+            else if (payload.ciphertext) text = base64ToUtf8(payload.ciphertext)
+            else if (payload.body) text = base64ToUtf8(payload.body)
           } catch {
             text = rawInput
           }
+
+          const innerPayload = cleanDecodePayload(text) || cleanDecodePayload(rawInput)
 
           const parseTs = (ts: any): string => {
             if (typeof ts === 'number') return new Date(ts).toISOString()
@@ -468,6 +468,14 @@ export class VextaBridgeClient {
             return new Date().toISOString()
           }
           const msgTimestamp = parseTs(payload.timestamp)
+
+          // Update sender presence on any incoming message or packet
+          if (payload.sender && payload.sender !== activeUser) {
+            db.updateContactLastActive(payload.sender, new Date().toISOString())
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('vexta_presence_updated', { detail: { username: payload.sender } }))
+            }
+          }
 
           if (innerPayload && typeof innerPayload === 'object') {
             if (innerPayload.type === 'group_msg') {
@@ -612,13 +620,15 @@ export class VextaBridgeClient {
               })
             }
           } else {
-            db.saveMessage({
-              sender: payload.sender,
-              recipient: payload.recipient,
-              ciphertext: text,
-              timestamp: msgTimestamp,
-              is_read: 0,
-            })
+            if (!isControlMessage(rawInput) && !isControlMessage(text)) {
+              db.saveMessage({
+                sender: payload.sender,
+                recipient: payload.recipient,
+                ciphertext: text,
+                timestamp: msgTimestamp,
+                is_read: 0,
+              })
+            }
           }
         } catch (e) {
           console.warn(`[Vexta WSS] Failed saving inbound message to DB:`, e)

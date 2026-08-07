@@ -329,6 +329,20 @@ export function CallModal() {
           {callState.isVideo && (
             <LocalVideoPreview stream={callState.localStream} isCameraOff={callState.isCameraOff} />
           )}
+
+          {/* Background Audio playback for all active remote peer streams */}
+          {callState.remoteStreams.map(({ peerId, stream }) => (
+            <audio
+              key={`audio_${peerId}`}
+              ref={(node) => {
+                if (node && stream) {
+                  node.srcObject = stream
+                }
+              }}
+              autoPlay
+              playsInline
+            />
+          ))}
         </div>
 
         {/* Call Controls Toolbar */}
