@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.8",
   "description": "Vexta Zero-Knowledge Encrypted Messenger",
+  "license": "MIT",
   "author": "Vexta Team <orientisdigital.official@gmail.com>",
   "type": "module",
   "main": "electron/main.cjs",

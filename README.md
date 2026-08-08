@@ -3,7 +3,7 @@
 [![Security](https://img.shields.io/badge/Security-Zero--Knowledge-brightgreen)](#cryptographic-architecture)
 [![Encryption](https://img.shields.io/badge/Encryption-E2EE%20RSA--4096%20%7C%20AES--256--GCM-blue)](#cryptographic-architecture)
 [![Protocol](https://img.shields.io/badge/Protocol-Vexta%20V2%20Rust%20Bridge-orange)](#network--protocol)
-[![License](https://img.shields.io/badge/License-Proprietary-red)](#)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](#license--attribution)
 
 > **Zero-Knowledge, End-to-End Encrypted Messenger** — Desktop client built with React 18, Vite, TypeScript, WebSockets, WebRTC, and packaged via Electron. Designed by **Orientis Digital**.
 
@@ -91,4 +91,4 @@ Routes are hash-based (`HashRouter`) to ensure full asset compatibility when run
 
 ## 📄 License & Attribution
 
-Copyright © 2026 **Orientis Digital**. All rights reserved.
+Licensed under the [MIT License](LICENSE). Copyright © 2026 **Orientis Digital**. All rights reserved.
