@@ -4,6 +4,7 @@ import ChatInfoView from './ChatInfoView'
 import { bridgeClient, cleanDecodePayload } from '../network/bridge'
 import { base64ToUtf8, isControlMessage, utf8ToBase64 } from '../network/codec'
 import { webrtcManager } from '../network/webrtc'
+import { playSentMessageSound } from '../core/sound_effects'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import {
   CheckIcon,
@@ -418,6 +419,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
     setDraft('')
     setReplyingTo(null)
+    playSentMessageSound()
     window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
 
     const field = fieldRef.current

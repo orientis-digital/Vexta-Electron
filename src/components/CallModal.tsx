@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { webrtcManager, type WebRTCState } from '../network/webrtc'
+import { playCallConnectedSound, playCallDisconnectedSound } from '../core/sound_effects'
 import {
   MicIcon,
   PhoneOffIcon,
@@ -121,6 +122,21 @@ export function CallModal() {
   }, [])
 
   // Call duration counter
+  const prevStatusRef = useRef(callState.status)
+
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    const curr = callState.status
+
+    if (curr === 'active' && prev !== 'active') {
+      playCallConnectedSound()
+    } else if (curr === 'idle' && (prev === 'active' || prev === 'calling' || prev === 'incoming')) {
+      playCallDisconnectedSound()
+    }
+
+    prevStatusRef.current = curr
+  }, [callState.status])
+
   useEffect(() => {
     let timer: any = null
     if (callState.status === 'active') {

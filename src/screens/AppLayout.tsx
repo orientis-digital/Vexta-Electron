@@ -21,6 +21,7 @@ import { VextaDatabaseManager } from '../crypto/db_manager'
 import { formatLastActive, presenceEngine } from '../network/presence'
 import { CallModal } from '../components/CallModal'
 import { DeviceApprovalModal } from '../components/DeviceApprovalModal'
+import { playIncomingMessageSound, playVaultLockSound } from '../core/sound_effects'
 
 const AVATAR_PALETTE = [
   '#39ff14',
@@ -326,7 +327,7 @@ function AppLayout() {
         const nowMs = Date.now()
         const activeUser = localStorage.getItem('vexta_active_user') || ''
         if (msg.sender && msg.sender !== activeUser) {
-          playNotificationSound()
+          playIncomingMessageSound()
 
           const isInactive = document.hidden || !document.hasFocus()
           if (isInactive) {

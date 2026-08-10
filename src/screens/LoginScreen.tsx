@@ -11,6 +11,7 @@ import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
 import { ArrowLeft, Laptop, OrientisLogo } from '../components/icons'
 import { ErrorState } from '../components/ErrorState'
+import { playVaultUnlockSound } from '../core/sound_effects'
 
 function SectionDivider({ label }: { label?: string }) {
   return (
@@ -126,6 +127,7 @@ function LoginScreen() {
       return
     }
 
+    playVaultUnlockSound()
     setUnlocking(true)
     setTimeout(() => navigate('/loading'), 800)
   }

@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { playErrorSound } from '../core/sound_effects'
 
 interface ErrorStateProps {
   title?: string
@@ -16,6 +17,10 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   isRetrying = false,
 }) => {
   const errorMessage = typeof error === 'string' ? error : error.message
+
+  useEffect(() => {
+    playErrorSound()
+  }, [error])
 
   return (
     <div className="error-state-banner">

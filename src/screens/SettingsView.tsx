@@ -16,6 +16,7 @@ import {
     ShieldIcon,
     SmartphoneIcon,
     TrashIcon,
+    VolumeIcon,
 } from '../components/icons'
 
 import { bridgeClient } from '../network/bridge'
@@ -23,12 +24,23 @@ import { exportVault, importVault, hashPasscode } from '../crypto/vault_backup'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbDevice } from '../crypto/db_manager'
 import { AuthSession } from '../crypto/session'
+import {
+  loadSoundSettings,
+  saveSoundSettings,
+  playIncomingMessageSound,
+  playSentMessageSound,
+  playErrorSound,
+  playCallConnectedSound,
+  playVaultUnlockSound,
+  type SoundSettings,
+} from '../core/sound_effects'
 
-type Tab = 'account' | 'security' | 'devices' | 'bridge' | 'storage' | 'about'
+type Tab = 'account' | 'security' | 'sound' | 'devices' | 'bridge' | 'storage' | 'about'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'account', label: 'Account & Keys', icon: <KeyIcon size={14} /> },
   { id: 'security', label: 'Security & Privacy', icon: <ShieldIcon size={14} /> },
+  { id: 'sound', label: 'Sound & Audio', icon: <VolumeIcon size={14} /> },
   { id: 'devices', label: 'Devices', icon: <DesktopIcon size={14} /> },
   { id: 'bridge', label: 'Bridge Network', icon: <ServerIcon size={14} /> },
   { id: 'storage', label: 'Data & Storage', icon: <DatabaseIcon size={14} /> },
@@ -92,6 +104,7 @@ function SettingsView() {
     const val = localStorage.getItem('vx_setting_notification_sounds')
     return val !== null ? val === 'true' : true
   })
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(loadSoundSettings)
   const [globalPresencePrivacy, setGlobalPresencePrivacy] = useState<'everyone' | 'nobody'>('everyone')
 
   useEffect(() => {
@@ -852,6 +865,193 @@ function SettingsView() {
                   </button>
                 </form>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: SOUND & AUDIO */}
+        {activeTab === 'sound' && (
+          <div className="settings-section-group">
+            <div className="info-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <VolumeIcon size={18} className="accent-icon" />
+                  <h3>Audio &amp; Sound Feedback Controls</h3>
+                </div>
+              </div>
+              <p className="card-desc">
+                Manage zero-latency Web Audio API sound effects, volume levels, and audio feedback triggers.
+              </p>
+
+              <div className="settings-form">
+                <div className="setting-control-group" style={{ marginBottom: '20px' }}>
+                  <span className="field-label" style={{ display: 'block', marginBottom: '8px' }}>
+                    Master Audio Volume ({soundSettings.masterVolume}%)
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={soundSettings.masterVolume}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10)
+                        const updated = { ...soundSettings, masterVolume: val }
+                        setSoundSettings(updated)
+                        saveSoundSettings(updated)
+                      }}
+                      style={{ flex: 1, accentColor: '#39ff14', cursor: 'pointer' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="toggle-list">
+                  <div className="toggle-item">
+                    <div className="toggle-info">
+                      <span className="toggle-title">Incoming Message Chime</span>
+                      <span className="toggle-desc">Play double sine chime when a new message arrives.</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => playIncomingMessageSound()}
+                      >
+                        Test
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={soundSettings.incomingMessage}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          const updated = { ...soundSettings, incomingMessage: val }
+                          setSoundSettings(updated)
+                          saveSoundSettings(updated)
+                          showToast(val ? 'Incoming message sound enabled' : 'Incoming message sound disabled')
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="toggle-item">
+                    <div className="toggle-info">
+                      <span className="toggle-title">Message Sent Pop Effect</span>
+                      <span className="toggle-desc">Play soft pop effect when sending an outbound message.</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => playSentMessageSound()}
+                      >
+                        Test
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={soundSettings.sentMessage}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          const updated = { ...soundSettings, sentMessage: val }
+                          setSoundSettings(updated)
+                          saveSoundSettings(updated)
+                          showToast(val ? 'Message sent sound enabled' : 'Message sent sound disabled')
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="toggle-item">
+                    <div className="toggle-info">
+                      <span className="toggle-title">Error &amp; Warning Alert Blips</span>
+                      <span className="toggle-desc">Play low warning blips when system or network errors occur.</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => playErrorSound()}
+                      >
+                        Test
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={soundSettings.errorAlert}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          const updated = { ...soundSettings, errorAlert: val }
+                          setSoundSettings(updated)
+                          saveSoundSettings(updated)
+                          showToast(val ? 'Error alert sound enabled' : 'Error alert sound disabled')
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="toggle-item">
+                    <div className="toggle-info">
+                      <span className="toggle-title">Voice &amp; Video Call Tones</span>
+                      <span className="toggle-desc">Play ascending or descending chimes when WebRTC calls connect or end.</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => playCallConnectedSound()}
+                      >
+                        Test Connect
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={soundSettings.callTones}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          const updated = { ...soundSettings, callTones: val }
+                          setSoundSettings(updated)
+                          saveSoundSettings(updated)
+                          showToast(val ? 'Call tone sounds enabled' : 'Call tone sounds disabled')
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="toggle-item">
+                    <div className="toggle-info">
+                      <span className="toggle-title">Vault Lock &amp; Unlock Clicks</span>
+                      <span className="toggle-desc">Play click sound when unlocking or locking the encrypted vault.</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => playVaultUnlockSound()}
+                      >
+                        Test Click
+                      </button>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch"
+                        checked={soundSettings.vaultClicks}
+                        onChange={(e) => {
+                          const val = e.target.checked
+                          const updated = { ...soundSettings, vaultClicks: val }
+                          setSoundSettings(updated)
+                          saveSoundSettings(updated)
+                          showToast(val ? 'Vault click sounds enabled' : 'Vault click sounds disabled')
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
