@@ -17,6 +17,7 @@ import {
     SmartphoneIcon,
     TrashIcon,
     VolumeIcon,
+    KeyboardIcon,
 } from '../components/icons'
 
 import { bridgeClient } from '../network/bridge'
@@ -34,13 +35,21 @@ import {
   playVaultUnlockSound,
   type SoundSettings,
 } from '../core/sound_effects'
+import {
+  loadShortcuts,
+  saveShortcuts,
+  resetShortcuts,
+  formatHotkeyEvent,
+  type ShortcutItem,
+} from '../core/shortcuts'
 
-type Tab = 'account' | 'security' | 'sound' | 'devices' | 'bridge' | 'storage' | 'about'
+type Tab = 'account' | 'security' | 'sound' | 'shortcuts' | 'devices' | 'bridge' | 'storage' | 'about'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'account', label: 'Account & Keys', icon: <KeyIcon size={14} /> },
   { id: 'security', label: 'Security & Privacy', icon: <ShieldIcon size={14} /> },
   { id: 'sound', label: 'Sound & Audio', icon: <VolumeIcon size={14} /> },
+  { id: 'shortcuts', label: 'Shortcuts & Hotkeys', icon: <KeyboardIcon size={14} /> },
   { id: 'devices', label: 'Devices', icon: <DesktopIcon size={14} /> },
   { id: 'bridge', label: 'Bridge Network', icon: <ServerIcon size={14} /> },
   { id: 'storage', label: 'Data & Storage', icon: <DatabaseIcon size={14} /> },
@@ -105,6 +114,29 @@ function SettingsView() {
     return val !== null ? val === 'true' : true
   })
   const [soundSettings, setSoundSettings] = useState<SoundSettings>(loadSoundSettings)
+  const [shortcuts, setShortcuts] = useState<ShortcutItem[]>(loadShortcuts)
+  const [recordingId, setRecordingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!recordingId) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+
+      const hotkey = formatHotkeyEvent(e)
+      if (!hotkey) return
+
+      const updated = shortcuts.map((s) => (s.id === recordingId ? { ...s, key: hotkey } : s))
+      setShortcuts(updated)
+      saveShortcuts(updated)
+      setRecordingId(null)
+      showToast(`Shortcut updated to ${hotkey}`)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [recordingId, shortcuts])
   const [globalPresencePrivacy, setGlobalPresencePrivacy] = useState<'everyone' | 'nobody'>('everyone')
 
   useEffect(() => {
@@ -1050,6 +1082,123 @@ function SettingsView() {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: SHORTCUTS & HOTKEYS */}
+        {activeTab === 'shortcuts' && (
+          <div className="settings-section-group">
+            <div className="info-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <KeyboardIcon size={18} className="accent-icon" />
+                  <h3>Keyboard Shortcuts &amp; Hotkey Controls</h3>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ fontSize: '11px', padding: '5px 10px' }}
+                  onClick={() => {
+                    const restored = resetShortcuts()
+                    setShortcuts(restored)
+                    setRecordingId(null)
+                    showToast('Shortcuts reset to default keybindings')
+                  }}
+                >
+                  Reset All to Defaults
+                </button>
+              </div>
+              <p className="card-desc">
+                Enable or disable active keyboard shortcuts and record custom key combinations.
+              </p>
+
+              <div className="settings-form">
+                <div className="toggle-list">
+                  {shortcuts.map((sc) => (
+                    <div key={sc.id} className="toggle-item" style={{ alignItems: 'flex-start' }}>
+                      <div className="toggle-info">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <span className="toggle-title">{sc.label}</span>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: 'rgba(255, 255, 255, 0.08)',
+                              color: 'var(--text-secondary)',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                            }}
+                          >
+                            {sc.category}
+                          </span>
+                        </div>
+                        <span className="toggle-desc">{sc.description}</span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {/* Hotkey Badge / Record Button */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className={`btn-secondary ${recordingId === sc.id ? 'active' : ''}`}
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              padding: '4px 10px',
+                              minWidth: '100px',
+                              textAlign: 'center',
+                              borderColor: recordingId === sc.id ? '#39ff14' : undefined,
+                              color: recordingId === sc.id ? '#39ff14' : undefined,
+                              background: recordingId === sc.id ? 'rgba(57, 255, 20, 0.1)' : undefined,
+                            }}
+                            onClick={() => setRecordingId(recordingId === sc.id ? null : sc.id)}
+                          >
+                            {recordingId === sc.id ? 'Press keys...' : sc.key}
+                          </button>
+
+                          {sc.key !== sc.defaultKey && (
+                            <button
+                              type="button"
+                              className="btn-text"
+                              style={{ fontSize: '11px', color: 'var(--text-secondary)' }}
+                              title="Reset keybinding to default"
+                              onClick={() => {
+                                const updated = shortcuts.map((item) =>
+                                  item.id === sc.id ? { ...item, key: sc.defaultKey } : item,
+                                )
+                                setShortcuts(updated)
+                                saveShortcuts(updated)
+                                showToast(`Reset shortcut to ${sc.defaultKey}`)
+                              }}
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Active Checkbox */}
+                        <input
+                          type="checkbox"
+                          className="toggle-switch"
+                          checked={sc.enabled}
+                          onChange={(e) => {
+                            const val = e.target.checked
+                            const updated = shortcuts.map((item) =>
+                              item.id === sc.id ? { ...item, enabled: val } : item,
+                            )
+                            setShortcuts(updated)
+                            saveShortcuts(updated)
+                            showToast(val ? `'${sc.label}' shortcut enabled` : `'${sc.label}' shortcut disabled`)
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

@@ -22,6 +22,7 @@ import { formatLastActive, presenceEngine } from '../network/presence'
 import { CallModal } from '../components/CallModal'
 import { DeviceApprovalModal } from '../components/DeviceApprovalModal'
 import { playIncomingMessageSound, playVaultLockSound } from '../core/sound_effects'
+import { loadShortcuts, matchesShortcut } from '../core/shortcuts'
 
 const AVATAR_PALETTE = [
   '#39ff14',
@@ -259,6 +260,35 @@ function AppLayout() {
       window.removeEventListener('touchstart', updateActivity)
       window.removeEventListener('scroll', updateActivity)
     }
+  }, [navigate])
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const shortcutList = loadShortcuts()
+
+      const lockSc = shortcutList.find((s) => s.id === 'lockVault')
+      if (lockSc?.enabled && matchesShortcut(e, lockSc.key)) {
+        e.preventDefault()
+        playVaultLockSound()
+        AuthSession.logout()
+        ;(window as any).vextaNative?.lockVault()
+        navigate('/login', { replace: true })
+        return
+      }
+
+      const switchSc = shortcutList.find((s) => s.id === 'quickSwitcher')
+      if (switchSc?.enabled && matchesShortcut(e, switchSc.key)) {
+        e.preventDefault()
+        const searchInput = document.querySelector<HTMLInputElement>('.search-bar input')
+        if (searchInput) {
+          searchInput.focus()
+          searchInput.select()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalShortcuts)
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts)
   }, [navigate])
 
   useEffect(() => {
