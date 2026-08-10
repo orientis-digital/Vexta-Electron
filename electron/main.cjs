@@ -237,10 +237,22 @@ function generateObfuscatedFilename(originalName = 'photo.jpg') {
   return `vx_${uid}_${dateStr}${ext}`
 }
 
+function fileUriToPath(fileUrl) {
+  if (typeof fileUrl !== 'string') return ''
+  let cleaned = fileUrl.replace(/^file:\/\//, '')
+  if (process.platform === 'win32') {
+    cleaned = cleaned.replace(/^\/+/, '')
+  }
+  try {
+    cleaned = decodeURIComponent(cleaned)
+  } catch {}
+  return path.normalize(cleaned)
+}
+
 // IPC Handlers
 ipcMain.handle('read-local-file-b64', async (_event, filePath) => {
   try {
-    const cleanPath = filePath.replace(/^file:\/\//, '')
+    const cleanPath = fileUriToPath(filePath)
     if (fs.existsSync(cleanPath)) {
       const buf = fs.readFileSync(cleanPath)
       const ext = path.extname(cleanPath).toLowerCase().replace('.', '')
@@ -288,7 +300,7 @@ ipcMain.handle('save-to-downloads', async (_event, { arrayBuffer, filePath: srcP
     const destPath = path.join(downloadsDir, safeName)
 
     if (srcPath) {
-      const cleanSrcPath = srcPath.replace(/^file:\/\//, '')
+      const cleanSrcPath = fileUriToPath(srcPath)
       if (fs.existsSync(cleanSrcPath)) {
         fs.copyFileSync(cleanSrcPath, destPath)
         console.log(`[Electron IPC] Copied file ${cleanSrcPath} -> ${destPath}`)
