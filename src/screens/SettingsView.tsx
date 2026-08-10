@@ -495,24 +495,28 @@ function SettingsView() {
         <p className="settings-subtitle">Manage vault security, keys, devices &amp; network settings</p>
       </div>
 
-      {/* Tabs Bar */}
-      <div className="tabs settings-tabs">
-        {TABS.map(({ id, label, icon }) => (
-          <button
-            key={id}
-            type="button"
-            className={`tab ${activeTab === id ? 'active' : ''}`}
-            onClick={() => setActiveTab(id)}
-          >
-            {icon}
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="settings-layout-container">
+        {/* Left Column: Settings Navigation Sidebar */}
+        <aside className="settings-sidebar">
+          <div className="settings-sidebar-nav">
+            {TABS.map(({ id, label, icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={`settings-nav-item ${activeTab === id ? 'active' : ''}`}
+                onClick={() => setActiveTab(id)}
+              >
+                <div className="settings-nav-icon">{icon}</div>
+                <span className="settings-nav-label">{label}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
 
-      <div className="settings-body">
-        {/* TAB 1: ACCOUNT & KEYS */}
-        {activeTab === 'account' && (
+        {/* Right Column: Active Options Panel */}
+        <main className="settings-content-panel">
+          {/* TAB 1: ACCOUNT & KEYS */}
+          {activeTab === 'account' && (
           <div className="settings-section-group">
             {/* User Profile Card */}
             <div className="info-card">
@@ -1604,6 +1608,8 @@ function SettingsView() {
             </div>
           </div>
         )}
+        </main>
+      </div>
       </div>
 
       {/* Link Device QR Modal */}
