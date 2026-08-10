@@ -127,6 +127,11 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  const isHiddenBoot = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden
+  if (isHiddenBoot) {
+    mainWindow.hide()
+  }
+
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Electron Main] Renderer process gone:', details)
     if (details.reason !== 'clean-exit' && mainWindow) {
@@ -326,6 +331,36 @@ ipcMain.handle('set-minimize-to-tray', (_event, enabled) => {
 
 ipcMain.handle('set-auto-launch', (_event, enabled) => {
   autoLaunch = !!enabled
+
+  if (process.platform === 'linux') {
+    const autostartDir = path.join(app.getPath('home'), '.config', 'autostart')
+    const desktopFilePath = path.join(autostartDir, 'vexta.desktop')
+
+    try {
+      if (enabled) {
+        const execPath = process.env.APPIMAGE || process.execPath
+        const desktopContent = `[Desktop Entry]
+Type=Application
+Name=Vexta Messenger
+Exec="${execPath}" --hidden
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Terminal=false
+Comment=End-to-End Encrypted Messenger
+`
+        if (!fs.existsSync(autostartDir)) {
+          fs.mkdirSync(autostartDir, { recursive: true })
+        }
+        fs.writeFileSync(desktopFilePath, desktopContent, 'utf-8')
+      } else if (fs.existsSync(desktopFilePath)) {
+        fs.unlinkSync(desktopFilePath)
+      }
+    } catch (err) {
+      console.warn('[Electron Main] Linux autostart desktop file update failed:', err)
+    }
+  }
+
   app.setLoginItemSettings({
     openAtLogin: autoLaunch,
     openAsHidden: true,
