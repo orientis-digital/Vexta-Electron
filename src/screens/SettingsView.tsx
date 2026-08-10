@@ -1610,7 +1610,6 @@ function SettingsView() {
         )}
         </main>
       </div>
-      </div>
 
       {/* Link Device QR Modal */}
       {pairQrOpen && (

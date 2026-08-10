@@ -231,9 +231,21 @@ fi
 # ==============================================================================
 log_step "5. Compiling React Application & Bundle Asset Generation"
 
+log_info "Verifying logo and application icon assets..."
+if [ ! -f "public/icon.png" ] || [ ! -f "public/icon.ico" ] || [ ! -f "public/orientis-logo.png" ]; then
+    log_error "Missing required logo files in ./public! (icon.png, icon.ico, or orientis-logo.png)"
+    exit 1
+fi
+
 log_info "Executing TypeScript typecheck & Vite build..."
 npm run build
 log_success "Static application bundle compiled to ./dist"
+
+log_info "Synchronizing logo assets into ./dist..."
+cp -f public/icon.png dist/icon.png 2>/dev/null || true
+cp -f public/icon.ico dist/icon.ico 2>/dev/null || true
+cp -f public/orientis-logo.png dist/orientis-logo.png 2>/dev/null || true
+log_success "Logo assets verified and packaged cleanly."
 
 # ==============================================================================
 # STEP 6: Electron Installer Packaging (Linux / Windows / All)

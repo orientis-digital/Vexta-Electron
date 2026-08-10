@@ -3184,13 +3184,15 @@ input::placeholder {
 /* ── Settings View Modern Styling ────────────────────── */
 
 .settings-screen {
-  max-width: 920px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   width: 100%;
-  padding: 24px;
+  height: 100%;
+  padding: 24px 32px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
+  overflow: hidden;
 }
 
 .settings-header {
@@ -5790,10 +5792,11 @@ input::placeholder {
   flex: 1;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .settings-sidebar {
-  width: 240px;
+  width: 220px;
   flex-shrink: 0;
   background: var(--bg-card, rgba(18, 22, 32, 0.5));
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
@@ -5802,7 +5805,8 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   height: fit-content;
-  align-self: flex-start;
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 .settings-sidebar-nav {
@@ -5857,9 +5861,12 @@ input::placeholder {
 .settings-content-panel {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 /* Responsive Fallback (< 860px) */
