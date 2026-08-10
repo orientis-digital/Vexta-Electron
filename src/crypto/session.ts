@@ -115,8 +115,9 @@ export class AuthSessionManager {
 
     const db = new VextaDatabaseManager(user)
     db.removeDevice(deviceId)
-    if (hardwareHash) {
-      bridgeClient.revokeDevice(hardwareHash)
+    const target = hardwareHash || deviceId
+    if (target) {
+      bridgeClient.revokeDevice(target)
     }
     return true
   }

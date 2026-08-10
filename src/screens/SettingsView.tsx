@@ -227,7 +227,13 @@ function SettingsView() {
         }
       }).catch(() => { })
     }
-  }, [])
+
+    try {
+      bridgeClient.listDevices()
+    } catch (e) {
+      console.warn('[Vexta Settings] listDevices query error:', e)
+    }
+  }, [activeTab])
 
   function revokeDevice(id: string, devName: string, hardwareHash?: string) {
     AuthSession.revokeDevice(id, hardwareHash)

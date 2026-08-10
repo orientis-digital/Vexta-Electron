@@ -292,6 +292,19 @@ function AppLayout() {
   }, [navigate])
 
   useEffect(() => {
+    const handleDeviceRevoked = (_e: Event) => {
+      console.warn('[Vexta AppLayout] Device access revoked by primary device!')
+      playVaultLockSound()
+      AuthSession.logout()
+      ;(window as any).vextaNative?.lockVault()
+      navigate('/login', { replace: true })
+    }
+
+    window.addEventListener('vexta_device_revoked', handleDeviceRevoked)
+    return () => window.removeEventListener('vexta_device_revoked', handleDeviceRevoked)
+  }, [navigate])
+
+  useEffect(() => {
     const parts = location.pathname.split('/')
     const currentChat = decodeURIComponent(parts[parts.length - 1] || '')
     if (currentChat) {

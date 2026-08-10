@@ -448,6 +448,12 @@ export class VextaBridgeClient {
     } else if (payload.type === 'DEVICE_REJECTED_EVENT') {
       console.warn(`[Vexta WSS] Received DEVICE_REJECTED_EVENT:`, payload.reason)
       this.deviceRejectionListeners.forEach((fn) => fn({ reason: payload.reason }))
+    } else if (payload.type === 'DEVICE_REVOKED_EVENT' || payload.type === 'DEVICE_REVOKED') {
+      console.warn(`[Vexta WSS] Received DEVICE_REVOKED_EVENT for this device.`)
+      this.setStatus('auth_failed')
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vexta_device_revoked', { detail: { reason: payload.reason || 'Device access revoked' } }))
+      }
     } else if (
       (payload.type &&
         ['blind_message', 'send_message', 'message', 'receive_message', 'relay', 'message_relay', 'direct_message'].includes(
