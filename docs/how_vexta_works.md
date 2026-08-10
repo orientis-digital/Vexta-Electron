@@ -138,6 +138,17 @@ persistent UUID). Sent on auth; the bridge supports list/revoke.
 - **Signed global announcements** pulled from `/api/announcements/?limit=5`,
   verified against a TOFU-trusted signing key.
 
+## 7. Chunked E2EE File Transfer Protocol
+
+Vexta implements Zero-Knowledge, chunked file sharing designed to securely stream large files without loading entire files into memory:
+
+1. **Chunking Engine**: Source files are split into **128 KB chunks** (`131,072` bytes).
+2. **Symmetric AES-GCM 256-bit Keying**: Each transfer generates an ephemeral 32-byte AES key. Each 128KB chunk is encrypted with a unique 12-byte random IV/nonce.
+3. **Chunk Streaming & Acknowledgments**: Chunks are transmitted sequentially (`file_chunk`). Receiver acknowledges each received chunk (`file_ack`), ensuring backpressure control and pause/resume capability.
+4. **End-to-End Integrity Checks**: The sender calculates a SHA-256 digest of the source file (`file_hash`). Once the final chunk is received, the receiver computes the SHA-256 digest of the reassembled file. Corrupted files trigger automatic deletion.
+
+---
+
 ## Notes for the React Native port
 
 - The bridge protocol is simple JSON over WSS and is trivially portable.

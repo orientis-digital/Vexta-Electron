@@ -1,4 +1,4 @@
-# Vexta Electron (v0.0.5)
+# Vexta Electron (v0.0.9)
 
 [![Security](https://img.shields.io/badge/Security-Zero--Knowledge-brightgreen)](#cryptographic-architecture)
 [![Encryption](https://img.shields.io/badge/Encryption-E2EE%20RSA--4096%20%7C%20AES--256--GCM-blue)](#cryptographic-architecture)
@@ -13,13 +13,27 @@
 
 - 🔐 **Zero-Knowledge Architecture**: Client-side RSA-4096 identity keypairs, PBKDF2 passcode hashing, and local AES-256-GCM encrypted vault storage. Private keys never touch the server relay network.
 - ⚡ **Vexta V2 Rust Bridge Integration**: Real-time WebSocket communications (`wss://vexta-api.nexusec.space/ws/chat/`) supporting both JSON and binary MessagePack payload decoding.
-- 📞 **Peer-to-Peer WebRTC Voice & Video Calling**: Full mesh and 1-on-1 voice and video calling with non-echo signaling and ICE candidate exchange.
-- 🟢 **Real-Time Presence & Heartbeat Engine**: Messenger-style 5-minute presence broadcasts with live status indicators (`● Active now`, relative last active timestamps, and sidebar status dots).
-- 📦 **Offline Outbound Queue & Auto-Flush**: Messages sent during network dropouts or socket reconnections are cached locally and automatically transmitted as soon as connection authentication is restored.
+- 📞 **Peer-to-Peer WebRTC Voice & Video Calling**: Full mesh and 1-on-1 voice and video calling with non-echo signaling, STUN candidate pools, and desktop screen sharing.
+- 🎵 **Web Audio Feedback Subsystem**: Synthesized zero-latency audio chimes for inbound messages, pops for outbound transmissions, error blips, call tones, and vault clicks.
+- ⌨️ **Customizable Keyboard Shortcuts**: Dedicated shortcuts settings panel with key combo recorders, active toggles, and instant vault locking (`Ctrl+Shift+L`).
+- 🖥️ **Responsive 2-Column Settings Layout**: Category navigation sidebar on left with independently scrollable options panel on right.
+- 🟢 **Real-Time Presence & Heartbeat Engine**: Messenger-style presence broadcasts with live status indicators (`● Active now`, relative timestamps, and sidebar status dots).
+- 📦 **Offline Outbound Queue & Auto-Flush**: Messages sent during network dropouts or socket reconnections are cached locally and automatically transmitted when online.
 - ✉️ **Delivery Checkmarks**: Live status indicators (`✓` Sent, `✓✓` Delivered / Read).
-- 📱 **Multi-Device Approval System**: Cryptographic PIN challenge verification for pairing secondary desktop or mobile devices.
+- 📱 **Multi-Device Approval System**: Cryptographic PIN challenge verification for pairing secondary desktop or mobile devices with real-time remote revocation handling.
 - ⏱️ **Disappearing Messages & Ephemeral Media**: Self-destructing timers for sensitive communications.
 - 🎨 **Sliding Drawer Chat Info Panel**: Smooth CSS cubic-bezier sliding drawer for channel security details, member rosters, and media archives.
+
+---
+
+## 📚 Technical Documentation Sitemap
+
+| Document | Path | Description |
+| :--- | :--- | :--- |
+| **File Transfer Implementation Guide** | [`docs/TODO.md`](docs/TODO.md) | Blueprint & step-by-step roadmap for Chunked 128KB E2EE File Transfer |
+| **API & WebSocket Payload Specs** | [`docs/api_endpoints.md`](docs/api_endpoints.md) | Full JSON message schemas, authentication frames, and signal types |
+| **System Architecture Guide** | [`docs/how_vexta_works.md`](docs/how_vexta_works.md) | Core zero-knowledge cryptographic model, keys, and network relay design |
+| **Screen Catalog & UI Guide** | [`docs/ui_screens.md`](docs/ui_screens.md) | Detailed walkthrough of application screens, routes, and UI components |
 
 ---
 
@@ -45,30 +59,12 @@ npm install
 ```bash
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
 
-### 3. Run Electron Client
-```bash
-npm run electron:dev
-```
-
----
-
-## 📦 Building & Packaging (AppImage / Executable)
-
-We provide an automated, interactive build script (`./build.sh`) for version management, linting, typechecking, and multi-platform compilation.
-
+### 3. Build & Package Installers
 ```bash
 chmod +x ./build.sh
 ./build.sh
 ```
-
-### Build Script Capabilities
-1. **Version Management**: Bump Patch, Minor, Major, or specify custom versions.
-2. **Platform Target Selection**:
-   - **Linux**: AppImage, `.deb`, `.tar.gz` (output in `dist-electron/`)
-   - **Windows**: `.exe` NSIS Installer & Portable
-3. **Quality Gate**: Code quality audit using `oxlint` and TypeScript compilation (`tsc -b`).
 
 ---
 
@@ -83,7 +79,7 @@ Routes are hash-based (`HashRouter`) to ensure full asset compatibility when run
 | `/loading` | **Session Bootstrapper** | Vault initialization & background sync |
 | `/` | **App Shell Layout** | Main sidebar, active conversations, presence status |
 | `/friends` | **Friends & Requests** | Pending requests counter, add/remove contacts |
-| `/settings` | **Security & App Settings** | Key management, device pairing, presence privacy |
+| `/settings` | **Security & App Settings** | 2-column settings layout, keys, devices, shortcuts |
 | `/chat/:chatId` | **Active Chat View** | Real-time messaging, attachments, voice call |
 | `/chat/:chatId/info` | **Chat Info Drawer** | Sliding security drawer & media archive |
 

@@ -190,6 +190,10 @@ These JSON structures are encrypted with recipient public keys prior to transmis
 | Group Roster Update | `{"type": "group_update", "group_uuid": "...", "group_name": "...", "members": [...]}` |
 | Group Kick | `{"type": "group_kick", "group_uuid": "...", "group_name": "..."}` |
 | File Init | `{"type": "file_init", "transfer_id": "...", "filename": "...", "file_size": 1048576, "chunk_size": 131072, "total_chunks": 8, "file_key": "...", "file_hash": "..."}` |
-| File Chunk | `{"type": "file_chunk", "transfer_id": "...", "chunk_index": 0, "data": "<b64>"}` |
+| File ACK Init | `{"type": "file_ack_init", "transfer_id": "..."}` |
+| File Chunk | `{"type": "file_chunk", "transfer_id": "...", "chunk_index": 0, "data": "<base64_encrypted_chunk>"}` |
 | File ACK | `{"type": "file_ack", "transfer_id": "...", "chunk_index": 0}` |
+| File Status Query | `{"type": "file_status_query", "transfer_id": "..."}` |
+| File Status Response | `{"type": "file_status_response", "transfer_id": "...", "last_received_chunk": 3}` |
+| File Cancel | `{"type": "file_cancel", "transfer_id": "...", "reason": "User cancelled"}` |
 | Metadata Sync | `{"type": "metadata_sync", "action": "ADD_CONTACT", "data": {...}}` (wrapped in `SYNC_META:`) |
