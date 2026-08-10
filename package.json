@@ -1,7 +1,7 @@
 {
   "name": "vexta",
   "private": true,
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Vexta Zero-Knowledge Encrypted Messenger",
   "license": "MIT",
   "author": "Vexta Team <orientisdigital.official@gmail.com>",

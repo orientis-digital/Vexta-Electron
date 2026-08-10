@@ -146,55 +146,6 @@ function chatIdOf(c: Contact) {
   return c.group ? `group_${c.name}` : c.name
 }
 
-function playNotificationSound() {
-  try {
-    const isSoundEnabled = localStorage.getItem('vx_setting_notification_sounds') !== 'false'
-    if (!isSoundEnabled) return
-
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
-    if (!AudioContextClass) return
-    const ctx = new AudioContextClass()
-
-    const osc = ctx.createOscillator()
-    const gainNode = ctx.createGain()
-
-    osc.connect(gainNode)
-    gainNode.connect(ctx.destination)
-
-    const now = ctx.currentTime
-
-    // Pleasant high-quality double chime
-    osc.type = 'sine'
-
-    // First chime
-    osc.frequency.setValueAtTime(523.25, now) // C5
-    gainNode.gain.setValueAtTime(0, now)
-    gainNode.gain.linearRampToValueAtTime(0.1, now + 0.01)
-    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
-
-    // Second chime
-    const osc2 = ctx.createOscillator()
-    const gainNode2 = ctx.createGain()
-    osc2.connect(gainNode2)
-    gainNode2.connect(ctx.destination)
-
-    osc2.type = 'sine'
-    osc2.frequency.setValueAtTime(783.99, now + 0.08) // G5
-
-    gainNode2.gain.setValueAtTime(0, now + 0.08)
-    gainNode2.gain.linearRampToValueAtTime(0.1, now + 0.09)
-    gainNode2.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
-
-    osc.start(now)
-    osc.stop(now + 0.15)
-
-    osc2.start(now + 0.08)
-    osc2.stop(now + 0.3)
-  } catch (err) {
-    console.warn('[Vexta Audio] Failed to play notification sound:', err)
-  }
-}
-
 function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
