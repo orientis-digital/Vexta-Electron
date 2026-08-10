@@ -10,6 +10,7 @@ import { base64ToUtf8 } from '../network/codec'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { hashPasscode } from '../crypto/vault_backup'
 import { ArrowLeft, Laptop, OrientisLogo } from '../components/icons'
+import { ErrorState } from '../components/ErrorState'
 
 function SectionDivider({ label }: { label?: string }) {
   return (
@@ -332,9 +333,11 @@ function LoginScreen() {
             </label>
 
             {authError && (
-              <div className="auth-error-box" role="alert">
-                <span>{authError}</span>
-              </div>
+              <ErrorState
+                title="Vault Authentication Error"
+                error={authError}
+                onDismiss={() => setAuthError(null)}
+              />
             )}
 
             <button type="submit" className="btn-primary" disabled={unlocking}>

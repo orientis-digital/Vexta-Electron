@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthSession } from '../crypto/session'
+import { ErrorState } from '../components/ErrorState'
 
 type Mode = 'welcome' | 'create' | 'restore' | 'import'
 
@@ -215,9 +216,11 @@ function SignupScreen() {
                 )}
 
                 {error && (
-                  <div className="auth-error-box" role="alert">
-                    <span>{error}</span>
-                  </div>
+                  <ErrorState
+                    title="Account Setup Error"
+                    error={error}
+                    onDismiss={() => setError(null)}
+                  />
                 )}
 
                 <button type="submit" className="btn-primary">

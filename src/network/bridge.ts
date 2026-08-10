@@ -129,6 +129,21 @@ export class VextaBridgeClient {
   constructor(defaultUrl?: string) {
     const savedUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('vexta_bridge_url') : null
     this.url = defaultUrl || savedUrl || 'wss://vexta-api.nexusec.space/ws/chat/'
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        console.log('[Vexta WSS] Network connection restored (online event). Triggering instant reconnect...')
+        if (this.status !== 'connected' && !this.isManualDisconnect) {
+          this.reconnectAttempts = 0
+          this.connect()
+        }
+      })
+      window.addEventListener('offline', () => {
+        console.warn('[Vexta WSS] Network connection lost (offline event). Updating bridge status.')
+        this.stopPingHeartbeat()
+        this.setStatus('disconnected')
+      })
+    }
   }
 
   setSessionPasscode(passcode: string | null) {

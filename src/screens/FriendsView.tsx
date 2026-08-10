@@ -13,6 +13,7 @@ import {
   ShieldIcon,
   UserPlusIcon,
 } from '../components/icons'
+import { EmptyState } from '../components/EmptyState'
 
 type Tab = 'active' | 'pending' | 'add'
 
@@ -334,10 +335,15 @@ function FriendsView() {
           ))}
 
           {friends.length === 0 && (
-            <div className="empty-friends-card">
-              <PeopleIcon size={32} className="muted-icon" />
-              <p>No active friends yet. Add a contact using their username or identity key.</p>
-            </div>
+            <EmptyState
+              icon={<PeopleIcon size={32} />}
+              title="No Active Contacts"
+              description="Add a contact using their username or identity key to start end-to-end encrypted messaging."
+              action={{
+                label: 'Add Friend',
+                onClick: () => setTab('add'),
+              }}
+            />
           )}
         </div>
       )}
@@ -394,10 +400,11 @@ function FriendsView() {
           ))}
 
           {pendingRequests.length === 0 && (
-            <div className="empty-friends-card">
-              <UserPlusIcon size={32} className="muted-icon" />
-              <p>No pending friend requests.</p>
-            </div>
+            <EmptyState
+              icon={<UserPlusIcon size={32} />}
+              title="No Pending Requests"
+              description="You have no incoming or outgoing friend authorization requests."
+            />
           )}
         </div>
       )}
