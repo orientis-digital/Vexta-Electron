@@ -34,7 +34,10 @@ const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun.services.mozilla.com' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.voip.blackberry.com:3478' },
   ],
+  iceCandidatePoolSize: 10,
 }
 
 class WebRTCManager {
@@ -216,7 +219,14 @@ class WebRTCManager {
   }
 
   private handleInboundOffer(caller: string, sdp: any, isGroup = false, isVideo = false) {
-    if (this.state.status !== 'idle') return
+    if (this.state.status !== 'idle') {
+      console.log(`[WebRTC] Busy: Already in active call (status: ${this.state.status}). Sending busy signal to @${caller}`)
+      bridgeClient.sendBlindMessage(
+        caller,
+        utf8ToBase64(JSON.stringify({ type: 'call_end', reason: 'busy' })),
+      )
+      return
+    }
 
     this.startCallTimeout()
     this.state = {
@@ -361,7 +371,9 @@ class WebRTCManager {
       try {
         const db = new VextaDatabaseManager(activeUser)
         let logText = 'Call Ended'
-        if (reason === 'declined' || currentStatus === 'calling') {
+        if (reason === 'busy') {
+          logText = 'User Busy'
+        } else if (reason === 'declined' || currentStatus === 'calling') {
           logText = 'Call Declined'
         } else if (reason === 'timeout' || currentStatus === 'incoming') {
           logText = 'Missed Call'
@@ -443,16 +455,20 @@ class WebRTCManager {
     if (this.state.isScreenSharing) {
       // Revert to camera / video
       try {
+        const existingAudioTrack = this.state.localStream.getAudioTracks()[0]
         const camStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: false,
           video: this.state.isVideo,
         })
-        const newTrack = camStream.getVideoTracks()[0]
+        const newVideoTrack = camStream.getVideoTracks()[0]
+        if (existingAudioTrack) {
+          camStream.addTrack(existingAudioTrack)
+        }
 
         this.peerConnections.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === 'video')
-          if (sender && newTrack) {
-            sender.replaceTrack(newTrack)
+          if (sender && newVideoTrack) {
+            sender.replaceTrack(newVideoTrack)
           }
         })
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification, session, desktopCapturer } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -647,6 +647,18 @@ ipcMain.handle('restart-and-install', () => {
 })
 
 app.whenReady().then(() => {
+  if (session.defaultSession) {
+    session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+      desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+        if (sources.length > 0) {
+          callback({ video: sources[0] })
+        }
+      }).catch((err) => {
+        console.warn('[Electron Main] setDisplayMediaRequestHandler error:', err)
+      })
+    })
+  }
+
   createWindow()
   createTray()
   registerShortcuts()
