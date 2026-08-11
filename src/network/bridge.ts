@@ -303,6 +303,7 @@ export class VextaBridgeClient {
       this.startPingHeartbeat()
       this.listFriendRequests()
       this.listFriends()
+      this.fetchAnnouncements()
       this.flushOutboundQueue()
     } else if (payload.type === 'PONG') {
       // Keep-alive heartbeat ack from relay server
@@ -663,15 +664,18 @@ export class VextaBridgeClient {
               } else if (innerPayload.action === 'DELETE_GROUP') {
                 db.deleteGroup(innerPayload.data.groupId)
               }
-            } else if (innerPayload.type === 'system_broadcast') {
+            } else if (innerPayload.type === 'system_broadcast' || payload.type === 'system_broadcast') {
               db.saveMessage({
                 sender: 'Vexta - Global Message',
                 recipient: activeUser,
-                ciphertext: innerPayload.announcement || text,
+                ciphertext: innerPayload.announcement || innerPayload.message || text,
                 timestamp: msgTimestamp,
                 is_read: 0,
                 is_system: 1,
               })
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+              }
             } else if (innerPayload.type === 'call_end') {
               db.saveMessage({
                 sender: payload.sender,
@@ -1159,6 +1163,59 @@ export class VextaBridgeClient {
 
   listFriends() {
     this.sendJson({ type: 'LIST_FRIENDS' })
+  }
+
+  async fetchAnnouncements(): Promise<void> {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    if (!activeUser) return
+
+    try {
+      const httpUrl = this.url
+        .replace(/^wss:\/\//i, 'https://')
+        .replace(/^ws:\/\//i, 'http://')
+        .replace(/\/ws\/chat\/?$/i, '/api/announcements/')
+
+      const res = await fetch(httpUrl)
+      if (!res.ok) return
+      const data = await res.json()
+      const list: Array<{ id?: number; message: string; created_at?: number | string }> = Array.isArray(data)
+        ? data
+        : (data.announcements || [])
+
+      if (!list.length) return
+
+      const db = new VextaDatabaseManager(activeUser)
+      const existing = db.getMessages('Vexta - Global Message')
+      let hasNew = false
+
+      for (const item of list) {
+        const msgText = item.message
+        if (!msgText) continue
+
+        const ts = typeof item.created_at === 'number'
+          ? new Date(item.created_at * 1000).toISOString()
+          : (item.created_at || new Date().toISOString())
+
+        const exists = existing.some((m) => m.ciphertext === msgText)
+        if (!exists) {
+          db.saveMessage({
+            sender: 'Vexta - Global Message',
+            recipient: activeUser,
+            ciphertext: msgText,
+            timestamp: ts,
+            is_read: 0,
+            is_system: 1,
+          })
+          hasNew = true
+        }
+      }
+
+      if (hasNew && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+      }
+    } catch (err) {
+      console.warn('[Vexta WSS] Failed fetching server announcements:', err)
+    }
   }
 
   listFriendRequests() {
