@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  CheckIcon,
-  CopyIcon,
   GearIcon,
   GroupIcon,
   PeopleIcon,
@@ -17,13 +15,10 @@ function HomeView() {
   const navigate = useNavigate()
   const activeUser = localStorage.getItem('vexta_active_user') || ''
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(bridgeClient.getStatus())
-  const [relayUrl, setRelayUrl] = useState<string>(bridgeClient.getUrl())
-  const [copied, setCopied] = useState(false)
   const [recentContacts, setRecentContacts] = useState<Array<{ name: string; isGroup?: boolean }>>([])
 
   useEffect(() => {
     setBridgeStatus(bridgeClient.getStatus())
-    setRelayUrl(bridgeClient.getUrl())
 
     const unsub = bridgeClient.subscribeStatus(setBridgeStatus)
 
@@ -40,12 +35,6 @@ function HomeView() {
 
     return () => unsub()
   }, [activeUser])
-
-  const copyRelayUrl = () => {
-    navigator.clipboard.writeText(relayUrl)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
 
   const getStatusText = (status: BridgeStatus) => {
     switch (status) {
