@@ -4062,10 +4062,61 @@ input::placeholder {
 
 /* ── UI Polish Styling Bundle ────────────────────────────────── */
 
-/* Markdown Spoilers & Code */
 .markdown-message {
-  display: inline-block;
+  display: block;
   word-break: break-word;
+  line-height: 1.5;
+}
+
+.markdown-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.markdown-line {
+  min-height: 1.2em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 10px 0 4px;
+}
+
+.markdown-h2 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 8px 0 4px;
+}
+
+.markdown-h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 6px 0 2px;
+}
+
+.markdown-hr {
+  border: none;
+  border-top: 1px solid var(--border-mid);
+  margin: 8px 0;
+}
+
+.markdown-bullet-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.markdown-bullet {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .markdown-inline-code {
