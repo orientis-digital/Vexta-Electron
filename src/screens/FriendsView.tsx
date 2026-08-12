@@ -169,6 +169,7 @@ function FriendsView() {
       })
       bridgeClient.acceptFriendRequest(id)
       window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
     }
     showToast(`Accepted friend request from ${name}`)
   }
@@ -181,6 +182,7 @@ function FriendsView() {
       db.removeContact(name)
       bridgeClient.rejectFriendRequest(id)
       window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
     }
     showToast(`Rejected friend request from ${name}`)
   }
@@ -194,6 +196,7 @@ function FriendsView() {
       db.clearMessages(name)
       bridgeClient.removeFriend(name)
       window.dispatchEvent(new CustomEvent('vexta_contact_removed', { detail: { name } }))
+      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
     }
     showToast(`Removed ${name} from contacts`)
   }
@@ -221,6 +224,8 @@ function FriendsView() {
         status: 'pending',
       })
       bridgeClient.sendFriendRequest(trimmed)
+      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
     }
 
     showToast(`Friend request sent to ${trimmed}`)

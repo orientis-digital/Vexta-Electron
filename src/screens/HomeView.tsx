@@ -81,30 +81,17 @@ function HomeView() {
           </div>
         </div>
 
-        {/* Prominent Bridge Relay Display */}
+        {/* Prominent Bridge Relay Status Display */}
         <div className="home-relay-card">
           <div className="relay-header">
             <div className="relay-title">
               <ServerIcon size={18} className="accent-icon" />
-              <h3>Bridge Relay</h3>
+              <h3>Bridge Connection</h3>
             </div>
             <span className={`relay-status-badge ${bridgeStatus}`}>
               <span className="status-dot" />
               {getStatusText(bridgeStatus)}
             </span>
-          </div>
-
-          <div className="relay-url-box">
-            <span className="relay-url-text">{relayUrl}</span>
-            <button
-              type="button"
-              className="btn-copy-relay"
-              onClick={copyRelayUrl}
-              title="Copy Bridge Relay URL"
-            >
-              {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
           </div>
 
           <div className="relay-specs-row">
@@ -116,7 +103,7 @@ function HomeView() {
               <span>Cipher: AES-256-GCM</span>
             </div>
             <div className="relay-spec-pill">
-              <span>RSA-4096 / PSS</span>
+              <span>Ed25519 / PSS</span>
             </div>
           </div>
         </div>
