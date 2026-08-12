@@ -201,40 +201,57 @@ function FriendsView() {
     showToast(`Removed ${name} from contacts`)
   }
 
-  function handleAddFriend(e: React.FormEvent) {
+  async function handleAddFriend(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = username.trim()
     if (!trimmed) return
 
     const activeUser = localStorage.getItem('vexta_active_user')
-    if (activeUser) {
-      const normTrimmed = trimmed.replace(/^@/, '').toLowerCase()
-      const normActive = activeUser.replace(/^@/, '').toLowerCase()
-      if (normTrimmed === normActive) {
-        showToast('Cannot send friend request to yourself')
-        return
-      }
+    if (!activeUser) return
 
-      const db = new VextaDatabaseManager(activeUser)
-      db.addContact({
-        username: trimmed,
-        public_key: 'PENDING_KEY',
-        display_name: trimmed,
-        created_at: new Date().toISOString(),
-        status: 'pending',
-      })
-      bridgeClient.sendFriendRequest(trimmed)
-      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
-      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
+    const normTrimmed = trimmed.replace(/^@/, '').toLowerCase()
+    const normActive = activeUser.replace(/^@/, '').toLowerCase()
+
+    // 1. Failsafe: Prevent user from adding themselves
+    if (normTrimmed === normActive) {
+      showToast('Cannot send friend request to yourself')
+      return
     }
 
-    showToast(`Friend request sent to ${trimmed}`)
+    // 2. Network Check: Verify recipient user exists on the Vexta Bridge network
+    try {
+      const bridgeUrl = bridgeClient.getUrl().replace(/^ws/, 'http')
+      const checkRes = await fetch(`${bridgeUrl}/api/check-account/${encodeURIComponent(normTrimmed)}`)
+      if (checkRes.ok) {
+        const checkData = await checkRes.json()
+        if (!checkData.exists) {
+          showToast(`User @${normTrimmed} does not exist on Vexta network`)
+          return
+        }
+      }
+    } catch (err) {
+      console.warn('[FriendsView] Account check error:', err)
+    }
+
+    const db = new VextaDatabaseManager(activeUser)
+    db.addContact({
+      username: normTrimmed,
+      public_key: 'PENDING_KEY',
+      display_name: normTrimmed,
+      created_at: new Date().toISOString(),
+      status: 'pending',
+    })
+    bridgeClient.sendFriendRequest(normTrimmed)
+    window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
+    window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
+
+    showToast(`Friend request sent to @${normTrimmed}`)
     setPendingRequests((prev) => [
-      ...prev,
+      ...prev.filter((r) => r.name.toLowerCase() !== normTrimmed),
       {
         id: Date.now().toString(),
-        name: trimmed,
-        handle: `@${trimmed.toLowerCase()}`,
+        name: normTrimmed,
+        handle: `@${normTrimmed}`,
         direction: 'outgoing',
         time: 'Just now',
       },
