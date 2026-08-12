@@ -258,16 +258,13 @@ function AppLayout() {
   useEffect(() => {
     const handleRosterUpdate = () => {
       setContacts(loadUserContacts())
-      bridgeClient.listFriendRequests()
     }
 
-    window.addEventListener('vexta_friend_request_updated', handleRosterUpdate)
     window.addEventListener('vexta_roster_updated', handleRosterUpdate)
     window.addEventListener('vexta_contact_removed', handleRosterUpdate)
     window.addEventListener('vexta_messages_updated', handleRosterUpdate)
 
     return () => {
-      window.removeEventListener('vexta_friend_request_updated', handleRosterUpdate)
       window.removeEventListener('vexta_roster_updated', handleRosterUpdate)
       window.removeEventListener('vexta_contact_removed', handleRosterUpdate)
       window.removeEventListener('vexta_messages_updated', handleRosterUpdate)
