@@ -665,16 +665,21 @@ export class VextaBridgeClient {
                 db.deleteGroup(innerPayload.data.groupId)
               }
             } else if (innerPayload.type === 'system_broadcast' || payload.type === 'system_broadcast') {
-              db.saveMessage({
-                sender: 'Vexta - Global Message',
-                recipient: activeUser,
-                ciphertext: innerPayload.announcement || innerPayload.message || text,
-                timestamp: msgTimestamp,
-                is_read: 0,
-                is_system: 1,
-              })
-              if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+              const annText = innerPayload.announcement || innerPayload.message || text
+              const existingMsgs = db.getMessages('Vexta - Global Message')
+              const alreadyExists = existingMsgs.some((m) => m.ciphertext === annText || m.ciphertext.includes(annText) || annText.includes(m.ciphertext))
+              if (!alreadyExists) {
+                db.saveMessage({
+                  sender: 'Vexta - Global Message',
+                  recipient: activeUser,
+                  ciphertext: annText,
+                  timestamp: msgTimestamp,
+                  is_read: 0,
+                  is_system: 1,
+                })
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+                }
               }
             } else if (innerPayload.type === 'call_end') {
               db.saveMessage({
@@ -1196,7 +1201,12 @@ export class VextaBridgeClient {
           ? new Date(item.created_at * 1000).toISOString()
           : (item.created_at || new Date().toISOString())
 
-        const exists = existing.some((m) => m.ciphertext === msgText)
+        const exists = existing.some(
+          (m) =>
+            m.ciphertext === msgText ||
+            m.ciphertext.includes(msgText) ||
+            msgText.includes(m.ciphertext),
+        )
         if (!exists) {
           db.saveMessage({
             sender: 'Vexta - Global Message',
