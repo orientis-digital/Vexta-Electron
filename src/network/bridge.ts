@@ -6,7 +6,7 @@ import {
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import type { DbFileTransfer } from '../crypto/db_manager'
 import { cacheReceivedMedia, decryptFileChunk, indexedDbCache } from '../crypto/file_transfer'
-import { base64ToUtf8, decodePayload, isControlMessage, utf8ToBase64 } from './codec'
+import { base64ToUtf8, decodePayload, isBinaryGarbage, isControlMessage, utf8ToBase64 } from './codec'
 
 export type BridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'auth_failed'
 
@@ -666,19 +666,21 @@ export class VextaBridgeClient {
               }
             } else if (innerPayload.type === 'system_broadcast' || payload.type === 'system_broadcast') {
               const annText = innerPayload.announcement || innerPayload.message || text
-              const existingMsgs = db.getMessages('Vexta - Global Message')
-              const alreadyExists = existingMsgs.some((m) => m.ciphertext === annText || m.ciphertext.includes(annText) || annText.includes(m.ciphertext))
-              if (!alreadyExists) {
-                db.saveMessage({
-                  sender: 'Vexta - Global Message',
-                  recipient: activeUser,
-                  ciphertext: annText,
-                  timestamp: msgTimestamp,
-                  is_read: 0,
-                  is_system: 1,
-                })
-                if (typeof window !== 'undefined') {
-                  window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+              if (annText && !isBinaryGarbage(annText)) {
+                const existingMsgs = db.getMessages('Vexta - Global Message')
+                const alreadyExists = existingMsgs.some((m) => m.ciphertext === annText || m.ciphertext.includes(annText) || annText.includes(m.ciphertext))
+                if (!alreadyExists) {
+                  db.saveMessage({
+                    sender: 'Vexta - Global Message',
+                    recipient: activeUser,
+                    ciphertext: annText,
+                    timestamp: msgTimestamp,
+                    is_read: 0,
+                    is_system: 1,
+                  })
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { name: 'Vexta - Global Message' } }))
+                  }
                 }
               }
             } else if (innerPayload.type === 'call_end') {

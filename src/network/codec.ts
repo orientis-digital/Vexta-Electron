@@ -91,11 +91,30 @@ export function decodePayload(input: ArrayBuffer | Uint8Array | string | any): a
 }
 
 /**
+ * Detects whether a string contains garbled binary bytes, unprintable control characters,
+ * or replacement characters (\uFFFD) resulting from raw encrypted byte decodes.
+ */
+export function isBinaryGarbage(str: string): boolean {
+  if (!str) return false
+  if (str.includes('\uFFFD')) return true
+  let unprintable = 0
+  for (let i = 0; i < Math.min(str.length, 100); i++) {
+    const code = str.charCodeAt(i)
+    if ((code < 32 && code !== 10 && code !== 13 && code !== 9) || (code >= 127 && code < 160)) {
+      unprintable++
+    }
+  }
+  return unprintable > 3
+}
+
+/**
  * Detects whether a raw input or decoded string is an internal signaling / control frame
- * (presence, file transfer chunk, call signaling, metadata sync) that should never be saved or displayed in chat messages.
+ * (presence, file transfer chunk, call signaling, metadata sync) or garbled binary noise
+ * that should never be saved or displayed in chat messages.
  */
 export function isControlMessage(input: string): boolean {
   if (!input) return false
+  if (isBinaryGarbage(input)) return true
 
   // Fast path: base64 prefix signatures for JSON control packets starting with {"type":
   if (
@@ -127,6 +146,7 @@ export function isControlMessage(input: string): boolean {
   if (isValidBase64(input.trim())) {
     const decoded = base64ToUtf8(input)
     if (decoded !== input) {
+      if (isBinaryGarbage(decoded)) return true
       const dc = decoded.toLowerCase()
       return (
         dc.includes('"type":"presence"') ||
