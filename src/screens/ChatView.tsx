@@ -211,6 +211,15 @@ function ChatView({ showInfo = false }: ChatViewProps) {
       const pInterval = setInterval(updatePresence, 5000)
       window.addEventListener('vexta_presence_updated', updatePresence)
 
+      const checkPurge = () => {
+        const purgedCount = db.purgeExpiredMessages()
+        if (purgedCount > 0) {
+          window.dispatchEvent(new CustomEvent('vexta_messages_updated', { detail: { chatId, name } }))
+        }
+      }
+      checkPurge()
+      const purgeInterval = setInterval(checkPurge, 3000)
+
       const dbMsgs = db.getMessages(name).filter((m) => {
         const text = m.ciphertext || ''
         if (
@@ -275,6 +284,7 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
       return () => {
         clearInterval(pInterval)
+        clearInterval(purgeInterval)
         window.removeEventListener('vexta_presence_updated', updatePresence)
         window.removeEventListener('vexta_messages_updated', handleMessagesUpdated)
       }

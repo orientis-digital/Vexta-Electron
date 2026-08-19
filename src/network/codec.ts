@@ -137,6 +137,8 @@ export function isControlMessage(input: string): boolean {
     lower.includes('"type":"call_offer"') ||
     lower.includes('"type":"call_answer"') ||
     lower.includes('"type":"call_ice"') ||
+    lower.includes('"type":"call_end"') ||
+    lower.includes('"type":"file_end"') ||
     lower.includes('"type":"metadata_sync"')
   ) {
     return true
@@ -157,6 +159,8 @@ export function isControlMessage(input: string): boolean {
         dc.includes('"type":"call_offer"') ||
         dc.includes('"type":"call_answer"') ||
         dc.includes('"type":"call_ice"') ||
+        dc.includes('"type":"call_end"') ||
+        dc.includes('"type":"file_end"') ||
         dc.includes('"type":"metadata_sync"')
       )
     }
