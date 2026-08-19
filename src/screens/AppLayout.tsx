@@ -81,7 +81,8 @@ function loadUserContacts(): Contact[] {
     const lastTs = lastMsg && lastMsg.timestamp ? (typeof lastMsg.timestamp === 'number' ? lastMsg.timestamp : new Date(lastMsg.timestamp).getTime()) : 0
 
     const lastActiveIso = db.getContactLastActive(c.username)
-    const isOnline = lastActiveIso ? formatLastActive(lastActiveIso).includes('Active now') : false
+    const lastActiveTime = lastActiveIso ? new Date(lastActiveIso).getTime() : 0
+    const isOnline = !isNaN(lastActiveTime) && lastActiveTime > 0 && Date.now() - lastActiveTime < 2 * 60 * 1000
 
     return {
       name: c.username,
@@ -93,7 +94,7 @@ function loadUserContacts(): Contact[] {
           ? 'Official announcements'
           : 'End-to-end encrypted',
       time: lastMsg ? formatDisplayTime(lastMsg.timestamp) || 'Recent' : 'Recent',
-      online: isOnline || c.status === 'active',
+      online: isOnline,
       lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
     }
   })
@@ -108,7 +109,7 @@ function loadUserContacts(): Contact[] {
       subtitle: lastMsg ? lastMsg.ciphertext : 'E2EE Group Chat',
       time: lastMsg ? formatDisplayTime(lastMsg.timestamp) || 'Group' : 'Group',
       group: true,
-      online: true,
+      online: false,
       lastTimestamp: isNaN(lastTs) ? 0 : lastTs,
     }
   })
@@ -117,7 +118,7 @@ function loadUserContacts(): Contact[] {
     name: SYSTEM_CHANNEL,
     subtitle: 'Official announcements',
     time: 'System',
-    online: true,
+    online: false,
     lastTimestamp: Infinity,
   }
 
@@ -634,8 +635,11 @@ function AppLayout() {
                         <span className="tile-indicator" />
                         <span className="avatar" style={avatarStyle(c.name, c.group)}>
                           {avatarContent(c.name, c.group)}
-                          {c.online !== undefined && (
-                            <span className={`presence ${c.online ? 'on' : ''}`} />
+                          {!c.group && c.name !== SYSTEM_CHANNEL && (
+                            <span
+                              className={`presence ${c.online ? 'on' : 'off'}`}
+                              title={c.online ? 'Online' : 'Offline'}
+                            />
                           )}
                         </span>
                         <span className="tile-body">
