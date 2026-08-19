@@ -221,8 +221,8 @@ function FriendsView() {
 
     // 2. Network Check: Verify recipient user exists on the Vexta Bridge network
     try {
-      const bridgeUrl = bridgeClient.getUrl().replace(/^ws/, 'http')
-      const checkRes = await fetch(`${bridgeUrl}/api/check-account/${encodeURIComponent(normTrimmed)}`)
+      const httpBase = bridgeClient.getUrl().replace(/^ws/i, 'http').replace(/\/ws\/.*$/i, '').replace(/\/$/, '')
+      const checkRes = await fetch(`${httpBase}/api/check-account/${encodeURIComponent(normTrimmed)}`)
       if (checkRes.ok) {
         const checkData = await checkRes.json()
         if (!checkData.exists) {

@@ -7,6 +7,7 @@
 import { deriveMasterKey } from './kdf'
 import { registerAccount, validateLogin } from './auth'
 import { bridgeClient } from '../network/bridge'
+import { utf8ToBase64 } from '../network/codec'
 
 import { VextaDatabaseManager } from './db_manager'
 
@@ -90,10 +91,10 @@ export class AuthSessionManager {
 
     // Package zero-knowledge key delegation bundle and friend roster
     const storedAccounts = localStorage.getItem('vexta_registered_accounts') || '[]'
-    const keyBundleB64 = btoa(storedAccounts)
+    const keyBundleB64 = utf8ToBase64(storedAccounts)
 
     const contacts = db.getContacts()
-    const rosterB64 = btoa(JSON.stringify(contacts))
+    const rosterB64 = utf8ToBase64(JSON.stringify(contacts))
 
     bridgeClient.sendDeviceApproval(deviceId, keyBundleB64, rosterB64)
     return true
