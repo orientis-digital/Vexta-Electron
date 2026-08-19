@@ -113,7 +113,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
@@ -125,9 +125,12 @@ function createWindow() {
 
   // Security: Prevent navigation to untrusted external URLs and force external links to default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:')) {
-      shell.openExternal(url).catch(() => {})
-    }
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:' || parsed.protocol === 'mailto:') {
+        shell.openExternal(url).catch(() => {})
+      }
+    } catch {}
     return { action: 'deny' }
   })
 
@@ -136,7 +139,12 @@ function createWindow() {
     const isLocalFile = url.startsWith('file://')
     if (!isDev && !isLocalFile) {
       event.preventDefault()
-      shell.openExternal(url).catch(() => {})
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:' || parsed.protocol === 'mailto:') {
+          shell.openExternal(url).catch(() => {})
+        }
+      } catch {}
     }
   })
 
