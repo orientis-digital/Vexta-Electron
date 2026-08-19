@@ -33,11 +33,18 @@ export type WebRTCState = {
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.services.mozilla.com' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.voip.blackberry.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ],
   iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
 }
 
 class WebRTCManager {
@@ -178,9 +185,17 @@ class WebRTCManager {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        const candidatePayload = event.candidate.toJSON
+          ? event.candidate.toJSON()
+          : {
+              candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+              usernameFragment: event.candidate.usernameFragment,
+            }
         bridgeClient.sendBlindMessage(
           recipient,
-          utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
+          utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: candidatePayload })),
         )
       }
     }
@@ -275,9 +290,17 @@ class WebRTCManager {
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          const candidatePayload = event.candidate.toJSON
+            ? event.candidate.toJSON()
+            : {
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                usernameFragment: event.candidate.usernameFragment,
+              }
           bridgeClient.sendBlindMessage(
             caller,
-            utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: event.candidate })),
+            utf8ToBase64(JSON.stringify({ type: 'call_ice', candidate: candidatePayload })),
           )
         }
       }
@@ -324,21 +347,24 @@ class WebRTCManager {
   }
 
   private async handleInboundIce(sender: string, candidate: any) {
-    if (!candidate || !candidate.candidate) return
+    if (!candidate) return
+    const candidateObj = typeof candidate === 'string' ? { candidate } : candidate
+    if (!candidateObj.candidate && typeof candidateObj !== 'object') return
+
     const pc = this.peerConnections.get(sender)
-    if (pc && pc.remoteDescription && candidate) {
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        await pc.addIceCandidate(new RTCIceCandidate(candidateObj))
       } catch (err) {
         console.warn('[WebRTC] Error adding ICE candidate:', err)
       }
-    } else if (candidate) {
+    } else {
       let list = this.pendingIceCandidates.get(sender)
       if (!list) {
         list = []
         this.pendingIceCandidates.set(sender, list)
       }
-      list.push(candidate)
+      list.push(candidateObj)
     }
   }
 

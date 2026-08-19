@@ -5,6 +5,14 @@ const fs = require('fs')
 
 // Force application name and local userData directory to 'Vexta' across all platforms
 app.name = 'Vexta'
+
+// Chromium flags for cross-platform WebRTC audio/video traversal (Linux <-> Windows)
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-webrtc-pipewire-capturer')
+}
+
 try {
   const customUserDataDir = path.join(app.getPath('appData'), 'Vexta')
   app.setPath('userData', customUserDataDir)

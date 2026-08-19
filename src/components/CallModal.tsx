@@ -354,6 +354,9 @@ export function CallModal() {
               ref={(node) => {
                 if (node && stream) {
                   node.srcObject = stream
+                  node.play().catch((err) => {
+                    console.warn(`[CallModal] Autoplay suppressed for peer ${peerId}:`, err)
+                  })
                 }
               }}
               autoPlay
