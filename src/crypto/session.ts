@@ -53,6 +53,7 @@ export class AuthSessionManager {
     // Derive KDF Master Key for current session
     if (res.account.saltHex) {
       this.masterKey = await deriveMasterKey(password, res.account.saltHex)
+      await VextaDatabaseManager.preloadVault(cleanUser)
     }
 
     localStorage.setItem('vexta_active_user', cleanUser)
@@ -75,6 +76,16 @@ export class AuthSessionManager {
     this.activeUser = cleanUser
     this.sessionPasscode = password
 
+    try {
+      const accounts = localStorage.getItem('vexta_registered_accounts') || '[]'
+      const list = JSON.parse(accounts)
+      const acc = list.find((a: any) => a.username.toLowerCase() === cleanUser.toLowerCase())
+      if (acc?.saltHex) {
+        this.masterKey = await deriveMasterKey(password, acc.saltHex)
+        await VextaDatabaseManager.preloadVault(cleanUser)
+      }
+    } catch {}
+
     localStorage.setItem('vexta_active_user', cleanUser)
     bridgeClient.setSessionPasscode(password)
     bridgeClient.setAuthMode('register')
@@ -89,14 +100,24 @@ export class AuthSessionManager {
     const db = new VextaDatabaseManager(user)
     db.updateDeviceStatus(deviceId, 'active')
 
-    // Package zero-knowledge key delegation bundle and friend roster
-    const storedAccounts = localStorage.getItem('vexta_registered_accounts') || '[]'
-    const keyBundleB64 = utf8ToBase64(storedAccounts)
+    // Find pending device metadata to dispatch authorization token via bridge
+    const dev = db.getDevices().find((d) => d.id === deviceId)
+    if (dev) {
+      const contacts = db.getContacts()
+      const groups = db.getGroups()
+      const syncRoster = utf8ToBase64(JSON.stringify({ contacts, groups }))
 
-    const contacts = db.getContacts()
-    const rosterB64 = utf8ToBase64(JSON.stringify(contacts))
+      bridgeClient.sendBlindMessage(
+        user,
+        JSON.stringify({
+          type: 'device_approved',
+          device_id: deviceId,
+          hardware_hash: dev.hardwareHash,
+          roster: syncRoster,
+        }),
+      )
+    }
 
-    bridgeClient.sendDeviceApproval(deviceId, keyBundleB64, rosterB64)
     return true
   }
 
@@ -127,6 +148,9 @@ export class AuthSessionManager {
     this.activeUser = null
     this.sessionPasscode = null
     this.masterKey = null
+
+    // Clear decrypted vault cache from RAM memory
+    VextaDatabaseManager.clearCache()
 
     // Wipe session passcode from WSS bridge client and disconnect socket cleanly
     bridgeClient.setSessionPasscode(null)

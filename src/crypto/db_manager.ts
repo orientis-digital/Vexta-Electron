@@ -10,6 +10,8 @@
  */
 
 import { isControlMessage } from '../network/codec'
+import { encryptVaultString, decryptVaultString } from './kdf'
+import { AuthSession } from './session'
 
 export type DbUserMeta = {
   id: number
@@ -71,8 +73,8 @@ export type DbFileTransfer = {
   file_hash: string
   sender: string
   recipient: string
-  status: 'pending' | 'transferring' | 'completed' | 'cancelled'
   created_at: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
   cached_path?: string
   cached_filename?: string
 }
@@ -91,14 +93,49 @@ export type DbDevice = {
   lastSeen: string
   isCurrent?: boolean
   status?: 'active' | 'pending_approval' | 'revoked'
-  osName?: string
-  pinChallenge?: string
-  devicePubKey?: string
 }
 
 export class VextaDatabaseManager {
   private dbName: string
   private storageKey: string
+  private static decryptedCache = new Map<string, string>()
+
+  static clearCache() {
+    VextaDatabaseManager.decryptedCache.clear()
+  }
+
+  static async preloadVault(username: string) {
+    const cleanUser = username.toLowerCase()
+    const storageKey = `vexta_db_${cleanUser}`
+    const masterKey = AuthSession.getMasterKey()
+    if (!masterKey) return
+
+    const suffixes = [
+      'contacts',
+      'messages',
+      'groups',
+      'group_members',
+      'file_transfers',
+      'chat_timers',
+      'chat_themes',
+      'pinned_messages',
+      'devices',
+      'server_trust',
+      'presence_overrides',
+      'last_active',
+    ]
+
+    for (const suffix of suffixes) {
+      const fullKey = `${storageKey}_${suffix}`
+      const raw = localStorage.getItem(fullKey)
+      if (raw && raw.startsWith('VXENC:')) {
+        const decrypted = await decryptVaultString(masterKey, raw)
+        if (decrypted) {
+          VextaDatabaseManager.decryptedCache.set(fullKey, decrypted)
+        }
+      }
+    }
+  }
 
   getDbName() {
     return this.dbName
@@ -113,6 +150,53 @@ export class VextaDatabaseManager {
     this.dbName = `account_${cleanUser}`
     this.storageKey = `vexta_db_${cleanUser}`
     this.initTables()
+  }
+
+  private readStore(tableSuffix: string): string | null {
+    const fullKey = `${this.storageKey}_${tableSuffix}`
+    const cached = VextaDatabaseManager.decryptedCache.get(fullKey)
+    if (cached) return cached
+
+    const raw = localStorage.getItem(fullKey)
+    if (!raw) return null
+
+    if (raw.startsWith('VXENC:')) {
+      const masterKey = AuthSession.getMasterKey()
+      if (masterKey) {
+        decryptVaultString(masterKey, raw).then((dec) => {
+          if (dec) {
+            VextaDatabaseManager.decryptedCache.set(fullKey, dec)
+          }
+        })
+      }
+      return null
+    }
+
+    // Legacy unencrypted plaintext: cache and migrate to AES-GCM envelope
+    VextaDatabaseManager.decryptedCache.set(fullKey, raw)
+    const masterKey = AuthSession.getMasterKey()
+    if (masterKey) {
+      encryptVaultString(masterKey, raw).then((enc) => {
+        localStorage.setItem(fullKey, enc)
+      }).catch(() => {})
+    }
+    return raw
+  }
+
+  private writeStore(tableSuffix: string, jsonStr: string): void {
+    const fullKey = `${this.storageKey}_${tableSuffix}`
+    VextaDatabaseManager.decryptedCache.set(fullKey, jsonStr)
+
+    const masterKey = AuthSession.getMasterKey()
+    if (masterKey) {
+      encryptVaultString(masterKey, jsonStr).then((enc) => {
+        localStorage.setItem(fullKey, enc)
+      }).catch(() => {
+        localStorage.setItem(fullKey, jsonStr)
+      })
+    } else {
+      localStorage.setItem(fullKey, jsonStr)
+    }
   }
 
   private checkStorageAccess(): boolean {
@@ -145,11 +229,11 @@ export class VextaDatabaseManager {
         status: 'active',
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_contacts`)) {
-        localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify([defaultSystemContact]))
+      if (!this.readStore('contacts')) {
+        this.writeStore('contacts', JSON.stringify([defaultSystemContact]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_messages`)) {
+      if (!this.readStore('messages')) {
         const defaultWelcomeMsg: DbMessage = {
           id: 1,
           sender: 'Vexta - Global Message',
@@ -159,31 +243,31 @@ export class VextaDatabaseManager {
           is_read: 1,
           is_system: 1,
         }
-        localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify([defaultWelcomeMsg]))
+        this.writeStore('messages', JSON.stringify([defaultWelcomeMsg]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_groups`)) {
-        localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify([]))
+      if (!this.readStore('groups')) {
+        this.writeStore('groups', JSON.stringify([]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_group_members`)) {
-        localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify([]))
+      if (!this.readStore('group_members')) {
+        this.writeStore('group_members', JSON.stringify([]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_file_transfers`)) {
-        localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify([]))
+      if (!this.readStore('file_transfers')) {
+        this.writeStore('file_transfers', JSON.stringify([]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_chat_timers`)) {
-        localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify({}))
+      if (!this.readStore('chat_timers')) {
+        this.writeStore('chat_timers', JSON.stringify({}))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_devices`)) {
-        localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify([]))
+      if (!this.readStore('devices')) {
+        this.writeStore('devices', JSON.stringify([]))
       }
 
-      if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
-        localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify([]))
+      if (!this.readStore('server_trust')) {
+        this.writeStore('server_trust', JSON.stringify([]))
       }
     } catch (err: any) {
       console.error('[Vexta DB] Error initializing tables:', err)
@@ -198,7 +282,7 @@ export class VextaDatabaseManager {
 
   // ── Contacts API ──────────────────────────────────────
   getContacts(): DbContact[] {
-    const data = localStorage.getItem(`${this.storageKey}_contacts`)
+    const data = this.readStore('contacts')
     let contacts: DbContact[] = data ? JSON.parse(data) : []
     const systemChannelName = 'Vexta - Global Message'
     if (!contacts.some((c) => c.username === systemChannelName)) {
@@ -210,7 +294,7 @@ export class VextaDatabaseManager {
         status: 'active',
       }
       contacts.unshift(defaultSysContact)
-      localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(contacts))
+      this.writeStore('contacts', JSON.stringify(contacts))
     }
     return contacts
   }
@@ -224,28 +308,28 @@ export class VextaDatabaseManager {
       username: (contact.username || '').trim().replace(/^@/, '')
     }
     updated.push(normalizedContact)
-    localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(updated))
+    this.writeStore('contacts', JSON.stringify(updated))
   }
 
   removeContact(username: string) {
     const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
     const contacts = this.getContacts().filter((c) => (c.username || '').trim().replace(/^@/, '').toLowerCase() !== cleanUsername)
-    localStorage.setItem(`${this.storageKey}_contacts`, JSON.stringify(contacts))
+    this.writeStore('contacts', JSON.stringify(contacts))
   }
 
   // ── Groups API ────────────────────────────────────────
   getGroups(): DbGroup[] {
-    const data = localStorage.getItem(`${this.storageKey}_groups`)
+    const data = this.readStore('groups')
     return data ? JSON.parse(data) : []
   }
 
   saveGroup(group: DbGroup, members?: string[]) {
     const groups = this.getGroups().filter((g) => g.group_id !== group.group_id)
     groups.push(group)
-    localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify(groups))
+    this.writeStore('groups', JSON.stringify(groups))
 
     if (members && members.length > 0) {
-      const allMembersData = localStorage.getItem(`${this.storageKey}_group_members`)
+      const allMembersData = this.readStore('group_members')
       let allMembers: DbGroupMember[] = allMembersData ? JSON.parse(allMembersData) : []
       allMembers = allMembers.filter((m) => m.group_id !== group.group_id)
       for (const username of members) {
@@ -255,28 +339,28 @@ export class VextaDatabaseManager {
           joined_at: new Date().toISOString(),
         })
       }
-      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(allMembers))
+      this.writeStore('group_members', JSON.stringify(allMembers))
     }
   }
 
   deleteGroup(groupId: string) {
     const groups = this.getGroups().filter((g) => g.group_id !== groupId)
-    localStorage.setItem(`${this.storageKey}_groups`, JSON.stringify(groups))
+    this.writeStore('groups', JSON.stringify(groups))
 
-    const allMembersData = localStorage.getItem(`${this.storageKey}_group_members`)
+    const allMembersData = this.readStore('group_members')
     const allMembers: DbGroupMember[] = allMembersData ? JSON.parse(allMembersData) : []
     const updatedMembers = allMembers.filter((m) => m.group_id !== groupId)
-    localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(updatedMembers))
+    this.writeStore('group_members', JSON.stringify(updatedMembers))
   }
 
   getGroupMembers(groupId: string): string[] {
-    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const data = this.readStore('group_members')
     const all: DbGroupMember[] = data ? JSON.parse(data) : []
     return all.filter((m) => m.group_id === groupId).map((m) => m.member_username)
   }
 
   addGroupMember(groupId: string, memberUsername: string) {
-    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const data = this.readStore('group_members')
     const all: DbGroupMember[] = data ? JSON.parse(data) : []
     if (!all.some((m) => m.group_id === groupId && m.member_username === memberUsername)) {
       all.push({
@@ -284,22 +368,22 @@ export class VextaDatabaseManager {
         member_username: memberUsername,
         joined_at: new Date().toISOString(),
       })
-      localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(all))
+      this.writeStore('group_members', JSON.stringify(all))
     }
   }
 
   removeGroupMember(groupId: string, memberUsername: string) {
-    const data = localStorage.getItem(`${this.storageKey}_group_members`)
+    const data = this.readStore('group_members')
     const all: DbGroupMember[] = data ? JSON.parse(data) : []
     const updated = all.filter(
       (m) => !(m.group_id === groupId && m.member_username === memberUsername),
     )
-    localStorage.setItem(`${this.storageKey}_group_members`, JSON.stringify(updated))
+    this.writeStore('group_members', JSON.stringify(updated))
   }
 
   // ── Messages API ──────────────────────────────────────
   getMessages(chatId: string): DbMessage[] {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const cleanId = (chatId || '').trim().replace(/^group_/, '').replace(/^@/, '').toLowerCase()
     const isGroupChat = chatId.startsWith('group_')
@@ -331,7 +415,7 @@ export class VextaDatabaseManager {
       return // Ignore control / signaling packets
     }
 
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const cleanSender = (msg.sender || '').trim().replace(/^@/, '')
     const cleanRecipient = (msg.recipient || '').trim().replace(/^@/, '')
@@ -372,14 +456,14 @@ export class VextaDatabaseManager {
       all.push(normalizedMsg)
     }
 
-    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
+    this.writeStore('messages', JSON.stringify(all))
   }
 
   deleteMessage(msgId: number) {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const filtered = all.filter((m) => m.id !== msgId)
-    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
+    this.writeStore('messages', JSON.stringify(filtered))
   }
 
   /**
@@ -391,7 +475,7 @@ export class VextaDatabaseManager {
     transferId: string,
     patch: { url?: string; voiceUrl?: string; attachment?: any },
   ): boolean {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const idx = all.findIndex((m) => m.transfer_id === transferId)
     if (idx < 0) return false
@@ -404,12 +488,12 @@ export class VextaDatabaseManager {
     } else if (patch.url && existing.attachment) {
       existing.attachment = { ...existing.attachment, url: patch.url }
     }
-    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
+    this.writeStore('messages', JSON.stringify(all))
     return true
   }
 
   clearMessages(chatId: string) {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const cleanId = chatId.replace(/^group_/, '')
     const filtered = all.filter(
@@ -423,11 +507,11 @@ export class VextaDatabaseManager {
         m.sender !== `group_${cleanId}` &&
         m.recipient !== `group_${cleanId}`,
     )
-    localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(filtered))
+    this.writeStore('messages', JSON.stringify(filtered))
   }
 
   toggleMessageReaction(msgId: number, emoji: string) {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     const all: DbMessage[] = data ? JSON.parse(data) : []
     const msg = all.find((m) => m.id === msgId)
     if (msg) {
@@ -437,62 +521,62 @@ export class VextaDatabaseManager {
       } else {
         msg.reactions = [...current, emoji]
       }
-      localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(all))
+      this.writeStore('messages', JSON.stringify(all))
     }
   }
 
   // ── Chat Timer & Disappearing Messages API ───────────
   getChatTimer(chatId: string): string | null {
-    const data = localStorage.getItem(`${this.storageKey}_chat_timers`)
+    const data = this.readStore('chat_timers')
     const timers = data ? JSON.parse(data) : {}
     return timers[chatId] || null
   }
 
   setChatTimer(chatId: string, timer: string | null) {
-    const data = localStorage.getItem(`${this.storageKey}_chat_timers`)
+    const data = this.readStore('chat_timers')
     const timers = data ? JSON.parse(data) : {}
     if (timer) {
       timers[chatId] = timer
     } else {
       delete timers[chatId]
     }
-    localStorage.setItem(`${this.storageKey}_chat_timers`, JSON.stringify(timers))
+    this.writeStore('chat_timers', JSON.stringify(timers))
   }
 
   // ── Per-Chat Color Theme Presets API ────────────────────
   getChatTheme(chatId: string): string {
-    const data = localStorage.getItem(`${this.storageKey}_chat_themes`)
+    const data = this.readStore('chat_themes')
     const themes = data ? JSON.parse(data) : {}
     return themes[chatId] || 'cyber_neon'
   }
 
   setChatTheme(chatId: string, themeId: string) {
-    const data = localStorage.getItem(`${this.storageKey}_chat_themes`)
+    const data = this.readStore('chat_themes')
     const themes = data ? JSON.parse(data) : {}
     themes[chatId] = themeId
-    localStorage.setItem(`${this.storageKey}_chat_themes`, JSON.stringify(themes))
+    this.writeStore('chat_themes', JSON.stringify(themes))
   }
 
   // ── Pinned Messages API ──────────────────────────────
   getPinnedMessage(chatId: string): string | null {
-    const data = localStorage.getItem(`${this.storageKey}_pinned_messages`)
+    const data = this.readStore('pinned_messages')
     const pinnedMap = data ? JSON.parse(data) : {}
     return pinnedMap[chatId] || null
   }
 
   setPinnedMessage(chatId: string, text: string | null) {
-    const data = localStorage.getItem(`${this.storageKey}_pinned_messages`)
+    const data = this.readStore('pinned_messages')
     const pinnedMap = data ? JSON.parse(data) : {}
     if (text) {
       pinnedMap[chatId] = text
     } else {
       delete pinnedMap[chatId]
     }
-    localStorage.setItem(`${this.storageKey}_pinned_messages`, JSON.stringify(pinnedMap))
+    this.writeStore('pinned_messages', JSON.stringify(pinnedMap))
   }
 
   purgeExpiredMessages(): number {
-    const data = localStorage.getItem(`${this.storageKey}_messages`)
+    const data = this.readStore('messages')
     if (!data) return 0
     const all: DbMessage[] = JSON.parse(data)
     const now = Date.now()
@@ -520,14 +604,14 @@ export class VextaDatabaseManager {
 
     const purgedCount = all.length - unexpired.length
     if (purgedCount > 0) {
-      localStorage.setItem(`${this.storageKey}_messages`, JSON.stringify(unexpired))
+      this.writeStore('messages', JSON.stringify(unexpired))
     }
     return purgedCount
   }
 
   // ── File Transfer API ─────────────────────────────────
   getFileTransfers(): DbFileTransfer[] {
-    const data = localStorage.getItem(`${this.storageKey}_file_transfers`)
+    const data = this.readStore('file_transfers')
     return data ? JSON.parse(data) : []
   }
 
@@ -538,7 +622,7 @@ export class VextaDatabaseManager {
   saveFileTransfer(transfer: DbFileTransfer) {
     const transfers = this.getFileTransfers().filter((t) => t.transfer_id !== transfer.transfer_id)
     transfers.push(transfer)
-    localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify(transfers))
+    this.writeStore('file_transfers', JSON.stringify(transfers))
   }
 
   updateFileTransferProgress(
@@ -555,28 +639,28 @@ export class VextaDatabaseManager {
       if (status) item.status = status
       if (cachedPath) item.cached_path = cachedPath
       if (cachedFilename) item.cached_filename = cachedFilename
-      localStorage.setItem(`${this.storageKey}_file_transfers`, JSON.stringify(transfers))
+      this.writeStore('file_transfers', JSON.stringify(transfers))
     }
   }
 
   // ── Server Trust API (TOFU) ──────────────────────────
   getServerTrust(host: string): DbServerTrust | null {
-    const data = localStorage.getItem(`${this.storageKey}_server_trust`)
+    const data = this.readStore('server_trust')
     const all: DbServerTrust[] = data ? JSON.parse(data) : []
     return all.find((s) => s.server_host === host) || null
   }
 
   saveServerTrust(trust: DbServerTrust) {
-    const data = localStorage.getItem(`${this.storageKey}_server_trust`)
+    const data = this.readStore('server_trust')
     const all: DbServerTrust[] = data ? JSON.parse(data) : []
     const updated = all.filter((s) => s.server_host !== trust.server_host)
     updated.push(trust)
-    localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify(updated))
+    this.writeStore('server_trust', JSON.stringify(updated))
   }
 
   // ── Devices API ──────────────────────────────────────
   getDevices(): DbDevice[] {
-    const data = localStorage.getItem(`${this.storageKey}_devices`)
+    const data = this.readStore('devices')
     return data ? JSON.parse(data) : []
   }
 
@@ -587,7 +671,7 @@ export class VextaDatabaseManager {
   saveDevice(device: DbDevice) {
     const all = this.getDevices().filter((d) => d.id !== device.id)
     all.push(device)
-    localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
+    this.writeStore('devices', JSON.stringify(all))
   }
 
   updateDeviceStatus(deviceId: string, status: 'active' | 'pending_approval' | 'revoked') {
@@ -596,51 +680,51 @@ export class VextaDatabaseManager {
     if (target) {
       target.status = status
       target.lastSeen = new Date().toISOString()
-      localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(devices))
+      this.writeStore('devices', JSON.stringify(devices))
     }
   }
 
   removeDevice(deviceId: string) {
     const all = this.getDevices().filter((d) => d.id !== deviceId)
-    localStorage.setItem(`${this.storageKey}_devices`, JSON.stringify(all))
+    this.writeStore('devices', JSON.stringify(all))
   }
 
   // ── Real-Time Presence & Privacy API ──────────────────
   getGlobalPresencePrivacy(): 'everyone' | 'nobody' {
-    const val = localStorage.getItem(`${this.storageKey}_presence_global`)
+    const val = this.readStore('presence_global')
     return val === 'nobody' ? 'nobody' : 'everyone'
   }
 
   setGlobalPresencePrivacy(mode: 'everyone' | 'nobody') {
-    localStorage.setItem(`${this.storageKey}_presence_global`, mode)
+    this.writeStore('presence_global', mode)
   }
 
   getFriendPresenceOverride(username: string): boolean {
     const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
-    const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
+    const data = this.readStore('presence_overrides')
     const overrides = data ? JSON.parse(data) : {}
     return overrides[cleanUsername] !== false // Default true (allowed)
   }
 
   setFriendPresenceOverride(username: string, allow: boolean) {
     const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
-    const data = localStorage.getItem(`${this.storageKey}_presence_overrides`)
+    const data = this.readStore('presence_overrides')
     const overrides = data ? JSON.parse(data) : {}
     overrides[cleanUsername] = allow
-    localStorage.setItem(`${this.storageKey}_presence_overrides`, JSON.stringify(overrides))
+    this.writeStore('presence_overrides', JSON.stringify(overrides))
   }
 
   updateContactLastActive(username: string, timestamp: string) {
     const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
-    const data = localStorage.getItem(`${this.storageKey}_last_active`)
+    const data = this.readStore('last_active')
     const lastActiveMap = data ? JSON.parse(data) : {}
     lastActiveMap[cleanUsername] = timestamp
-    localStorage.setItem(`${this.storageKey}_last_active`, JSON.stringify(lastActiveMap))
+    this.writeStore('last_active', JSON.stringify(lastActiveMap))
   }
 
   getContactLastActive(username: string): string | null {
     const cleanUsername = (username || '').trim().replace(/^@/, '').toLowerCase()
-    const data = localStorage.getItem(`${this.storageKey}_last_active`)
+    const data = this.readStore('last_active')
     const lastActiveMap = data ? JSON.parse(data) : {}
     return lastActiveMap[cleanUsername] || null
   }

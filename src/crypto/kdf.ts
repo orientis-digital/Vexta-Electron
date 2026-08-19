@@ -88,3 +88,35 @@ export async function decryptBytesGCM(
   )
   return new Uint8Array(decrypted)
 }
+
+/**
+ * Encrypts a string into an authenticated AES-GCM envelope (`VXENC:<iv_hex>:<ciphertext_hex>`)
+ * using the user's derived master key for transparent encryption at rest.
+ */
+export async function encryptVaultString(key: CryptoKey, plaintext: string): Promise<string> {
+  const enc = new TextEncoder()
+  const bytes = enc.encode(plaintext)
+  const { ciphertext, iv } = await encryptBytesGCM(key, bytes)
+  return `VXENC:${bytesToHex(iv)}:${bytesToHex(ciphertext)}`
+}
+
+/**
+ * Decrypts an authenticated AES-GCM envelope (`VXENC:<iv_hex>:<ciphertext_hex>`).
+ * If the input is unencrypted (legacy), returns the string as-is (backward compatible).
+ */
+export async function decryptVaultString(key: CryptoKey, storedVal: string): Promise<string> {
+  if (!storedVal || !storedVal.startsWith('VXENC:')) {
+    return storedVal
+  }
+  try {
+    const parts = storedVal.split(':')
+    if (parts.length < 3) return storedVal
+    const iv = hexToBytes(parts[1])
+    const ciphertext = hexToBytes(parts[2])
+    const decryptedBytes = await decryptBytesGCM(key, ciphertext, iv)
+    return new TextDecoder().decode(decryptedBytes)
+  } catch (err) {
+    console.warn('[Vexta KDF] Failed to decrypt vault record with master key:', err)
+    return ''
+  }
+}

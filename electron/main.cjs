@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification, session, desktopCapturer } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification, session, desktopCapturer, shell } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -121,6 +121,23 @@ function createWindow() {
   // Prevent renderer document.title from overriding window title
   mainWindow.on('page-title-updated', (event) => {
     event.preventDefault()
+  })
+
+  // Security: Prevent navigation to untrusted external URLs and force external links to default browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:')) {
+      shell.openExternal(url).catch(() => {})
+    }
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isDev = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
+    const isLocalFile = url.startsWith('file://')
+    if (!isDev && !isLocalFile) {
+      event.preventDefault()
+      shell.openExternal(url).catch(() => {})
+    }
   })
 
   if (screenProtection && process.platform !== 'linux') {
