@@ -5949,9 +5949,180 @@ input::placeholder {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ── Comprehensive Motion & Micro-Interactions ─────────────────────────────
+   ═══════════════════════════════════════════════════════════════════════════ */
 
+/* 1. Global Button & Control Tactile Physics */
+button,
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-danger,
+.btn-danger-outline,
+.send-btn,
+.tab,
+.action-btn,
+.icon-btn {
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.2s ease,
+              border-color 0.2s ease,
+              box-shadow 0.2s ease,
+              color 0.2s ease,
+              opacity 0.2s ease;
+}
 
+button:active,
+.btn-primary:active,
+.btn-secondary:active,
+.btn-ghost:active,
+.btn-danger:active,
+.btn-danger-outline:active,
+.send-btn:active,
+.tab:active,
+.action-btn:active,
+.icon-btn:active {
+  transform: scale(0.96);
+}
 
+/* 2. Sidebar Chat Tiles Micro-Interactions */
+.sidebar .tile {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.18s ease,
+              border-color 0.18s ease;
+}
 
+.sidebar .tile:hover {
+  transform: translateX(4px);
+}
 
+.sidebar .tile:active {
+  transform: translateX(2px) scale(0.99);
+}
 
+/* 3. Real-Time Presence Dot Breathing Glow */
+@keyframes presenceBreathingGlow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(57, 255, 20, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(57, 255, 20, 0.95), 0 0 16px rgba(57, 255, 20, 0.35);
+  }
+}
+
+.presence-dot.online,
+.presence.on {
+  animation: presenceBreathingGlow 2.4s infinite ease-in-out;
+}
+
+/* 4. Chat View Theme Transitions & Bubble Entry Animation */
+.chat-view {
+  transition: background 0.4s ease, border-color 0.4s ease;
+}
+
+.chat-view .bubble.me {
+  transition: background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.chat-view .send-btn {
+  transition: background 0.3s ease, transform 0.12s ease, box-shadow 0.2s ease;
+}
+
+@keyframes bubblePopIn {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.chat-view .msg {
+  animation: bubblePopIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 5. Modal Transitions (Backdrop Blur Fade & Dialog Pop) */
+@keyframes modalBackdropFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+}
+
+@keyframes modalDialogPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-backdrop {
+  animation: modalBackdropFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.modal-backdrop .modal,
+.modal-backdrop .call-modal {
+  animation: modalDialogPopIn 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* 6. Card & Grid Item Staggered Entrance */
+@keyframes cardSlideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.friends-grid .friend-card,
+.pending-list .pending-item,
+.wallpaper-grid .wallpaper-card,
+.info-card,
+.settings-section {
+  animation: cardSlideInUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 7. Toast Spring Feedback Animation */
+@keyframes toastSpringNotice {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-notice,
+.toast {
+  animation: toastSpringNotice 0.36s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* 8. QR Code SVG Glowing Container */
+.vexta-qr-code {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+  box-shadow: 0 0 20px rgba(57, 255, 20, 0.12);
+}
+
+.vexta-qr-code:hover {
+  transform: scale(1.02);
+  box-shadow: 0 0 30px rgba(57, 255, 20, 0.25);
+}
