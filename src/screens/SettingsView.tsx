@@ -88,6 +88,8 @@ function SettingsView() {
   const [systemInfo, setSystemInfo] = useState<{ osName?: string; arch?: string; appVersion?: string } | null>(null)
 
   const [serverFingerprint, setServerFingerprint] = useState<string | null>(null)
+  const [bridgeUrl, setBridgeUrl] = useState(() => bridgeClient.getUrl())
+  const [appVersion, setAppVersion] = useState('0.0.0.5')
 
   useEffect(() => {
     const user = AuthSession.getActiveUser() || localStorage.getItem('vexta_active_user') || 'User'
@@ -301,7 +303,6 @@ function SettingsView() {
   }
 
   // ── Bridge Network State ─────────────────────────────
-  const [bridgeUrl, setBridgeUrl] = useState(() => bridgeClient.getUrl())
   const [testingPing, setTestingPing] = useState(false)
   const [pingLatency, setPingLatency] = useState<number | null>(24)
   const [customBridge, setCustomBridge] = useState(false)
@@ -517,7 +518,6 @@ function SettingsView() {
   }
 
   // ── About & Auto-Update State ─────────────────────────────
-  const [appVersion, setAppVersion] = useState('0.0.0.5')
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
   const [updateProgress, setUpdateProgress] = useState<number>(0)
