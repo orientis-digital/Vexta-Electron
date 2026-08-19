@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 
 /**
  * Pure TypeScript Zero-Dependency QR Code Generator (ISO/IEC 18004)

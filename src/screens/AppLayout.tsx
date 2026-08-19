@@ -18,7 +18,7 @@ import {
 } from '../components/icons'
 
 import { VextaDatabaseManager } from '../crypto/db_manager'
-import { formatLastActive, presenceEngine } from '../network/presence'
+import { presenceEngine } from '../network/presence'
 import { CallModal } from '../components/CallModal'
 import { DeviceApprovalModal } from '../components/DeviceApprovalModal'
 import { playIncomingMessageSound, playVaultLockSound } from '../core/sound_effects'

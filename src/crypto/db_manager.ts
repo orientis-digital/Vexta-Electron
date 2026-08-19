@@ -93,6 +93,9 @@ export type DbDevice = {
   lastSeen: string
   isCurrent?: boolean
   status?: 'active' | 'pending_approval' | 'revoked'
+  osName?: string
+  pinChallenge?: string
+  devicePubKey?: string
 }
 
 export class VextaDatabaseManager {

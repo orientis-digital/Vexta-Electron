@@ -609,7 +609,7 @@ export class VextaBridgeClient {
                     db.updateFileTransferProgress(
                       innerPayload.transfer_id,
                       receivedCount,
-                      isComplete ? 'completed' : 'transferring',
+                      isComplete ? 'completed' : 'in_progress',
                     )
 
                     if (isComplete) {

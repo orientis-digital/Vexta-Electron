@@ -87,7 +87,7 @@ function SettingsView() {
   const [showRecovery, setShowRecovery] = useState(false)
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null)
   const [userFingerprint, setUserFingerprint] = useState<string | null>(null)
-  const [systemInfo, setSystemInfo] = useState<{ osName?: string; arch?: string; appVersion?: string } | null>(null)
+  const [systemInfo, setSystemInfo] = useState<{ osName?: string; arch?: string; appVersion?: string; deviceName?: string } | null>(null)
 
   const [serverFingerprint, setServerFingerprint] = useState<string | null>(null)
   const [bridgeUrl, setBridgeUrl] = useState(() => bridgeClient.getUrl())
