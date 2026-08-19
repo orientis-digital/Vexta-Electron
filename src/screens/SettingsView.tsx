@@ -572,7 +572,7 @@ function SettingsView() {
     } else {
       setTimeout(() => {
         setCheckingUpdates(false)
-        setUpdateStatus('Vexta is up to date (v2.4.0-electron)')
+        setUpdateStatus(`Vexta is up to date (v${appVersion})`)
       }, 1200)
     }
   }
@@ -1652,16 +1652,24 @@ function SettingsView() {
 
               <div className="spec-grid">
                 <div className="spec-item">
-                  <span className="spec-label">Version</span>
+                  <span className="spec-label">Client Version</span>
                   <span className="spec-value">v{appVersion}</span>
                 </div>
                 <div className="spec-item">
-                  <span className="spec-label">Build</span>
-                  <span className="spec-value">2026.08.03-STABLE</span>
+                  <span className="spec-label">Environment</span>
+                  <span className="spec-value">{systemInfo?.osName || 'Desktop'} ({systemInfo?.arch || 'x64'})</span>
                 </div>
                 <div className="spec-item">
-                  <span className="spec-label">Runtime</span>
+                  <span className="spec-label">Runtime Engine</span>
                   <span className="spec-value">Electron · React 19</span>
+                </div>
+                <div className="spec-item">
+                  <span className="spec-label">Crypto Core</span>
+                  <span className="spec-value">Argon2id · AES-256 · RSA-4096</span>
+                </div>
+                <div className="spec-item">
+                  <span className="spec-label">Vault Security</span>
+                  <span className="spec-value">AES-GCM Encrypted at Rest</span>
                 </div>
                 <div className="spec-item">
                   <span className="spec-label">Publisher</span>
@@ -1724,11 +1732,41 @@ function SettingsView() {
               <div className="card-header">
                 <div className="card-title">
                   <ShieldIcon size={16} className="accent-icon" />
+                  <h3>Protocol &amp; Security Architecture</h3>
+                </div>
+              </div>
+              <p className="card-desc">
+                Vexta is an open-source, zero-knowledge communication network. All chats, voice/video streams, file transfers, and device pairings operate strictly peer-to-peer or over blind relay nodes without storing plaintext metadata on servers.
+              </p>
+              <div className="card-actions" style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <a
+                  href="https://github.com/orientis-digital/vexta-public"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-secondary"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <DesktopIcon size={14} /> GitHub Repository
+                </a>
+                <a
+                  href="mailto:orientisdigital.official@gmail.com"
+                  className="btn-secondary"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <ShieldIcon size={14} /> Security Advisory
+                </a>
+              </div>
+            </div>
+
+            <div className="info-card">
+              <div className="card-header">
+                <div className="card-title">
+                  <CheckIcon size={16} className="accent-icon" />
                   <h3>License &amp; Open Source</h3>
                 </div>
               </div>
               <p className="card-desc">
-                Vexta protocol specification &amp; client code are released under the MIT Open Source License. Designed for privacy, security, and true end-to-end zero-knowledge communication.
+                Released under the <strong>MIT License</strong>. Copyright &copy; {new Date().getFullYear()} Orientis Digital. All rights reserved.
               </p>
             </div>
           </div>
