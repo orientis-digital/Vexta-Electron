@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthSession } from '../crypto/session'
+import { recoverAccount, getRegisteredAccounts } from '../crypto/auth'
+import { importVault } from '../crypto/vault_backup'
 import { ErrorState } from '../components/ErrorState'
 
 type Mode = 'welcome' | 'create' | 'restore' | 'import'
@@ -27,8 +29,10 @@ function SignupScreen() {
   const [confirmPw, setConfirmPw] = useState('')
   const [recoveryCode, setRecoveryCode] = useState('')
   const [syncLink, setSyncLink] = useState('')
+  const [importFile, setImportFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [createdCode, setCreatedCode] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const handleSyncLinkChange = (val: string) => {
     setSyncLink(val)
@@ -43,6 +47,35 @@ function SignupScreen() {
     e.preventDefault()
     setError(null)
 
+    if (mode === 'import') {
+      if (!importFile) {
+        setError('Please select a .vxvault file')
+        return
+      }
+      if (!password) {
+        setError('Backup password is required')
+        return
+      }
+      setLoading(true)
+      try {
+        const buffer = await importFile.arrayBuffer()
+        const res = await importVault(buffer, password)
+        if (!res.success) {
+          setError(res.error || 'Import failed')
+          setLoading(false)
+          return
+        }
+        const accounts = getRegisteredAccounts()
+        const userToActivate = accounts[0]?.username || localStorage.getItem('vexta_active_user') || 'User'
+        localStorage.setItem('vexta_active_user', userToActivate)
+        navigate('/loading')
+      } catch (err: any) {
+        setError(err?.message || 'Failed to read vault file')
+        setLoading(false)
+      }
+      return
+    }
+
     if (!username.trim()) {
       setError('Username is required')
       return
@@ -51,21 +84,53 @@ function SignupScreen() {
       setError('Password is required')
       return
     }
-    if (mode === 'create' && password !== confirmPw) {
-      setError('Passwords do not match')
-      return
-    }
 
     const cleanName = username.trim()
-    const res = await AuthSession.register(cleanName, password)
-    if (!res.success) {
-      setError(res.error || 'Registration failed')
+
+    if (mode === 'create') {
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters')
+        return
+      }
+      if (password !== confirmPw) {
+        setError('Passwords do not match')
+        return
+      }
+
+      setLoading(true)
+      const res = await AuthSession.register(cleanName, password)
+      setLoading(false)
+      if (!res.success) {
+        setError(res.error || 'Registration failed')
+        return
+      }
+
+      if (res.recoveryCode) {
+        setCreatedCode(res.recoveryCode)
+      } else {
+        navigate('/loading')
+      }
       return
     }
 
-    if (res.recoveryCode) {
-      setCreatedCode(res.recoveryCode)
-    } else {
+    if (mode === 'restore') {
+      setLoading(true)
+      if (recoveryCode.trim()) {
+        const recRes = await recoverAccount(cleanName, recoveryCode.trim(), password)
+        if (!recRes.success) {
+          setError(recRes.error || 'Recovery code verification failed')
+          setLoading(false)
+          return
+        }
+      }
+
+      const loginRes = await AuthSession.login(cleanName, password)
+      setLoading(false)
+      if (!loginRes.success) {
+        setError(loginRes.error || 'Login failed')
+        return
+      }
+
       navigate('/loading')
     }
   }
@@ -236,19 +301,38 @@ function SignupScreen() {
               <form className="login-form" onSubmit={handleCreate}>
                 <label>
                   .vxvault file
-                  <input type="file" accept=".vxvault" />
+                  <input
+                    type="file"
+                    accept=".vxvault"
+                    onChange={(e) => {
+                      setImportFile(e.target.files?.[0] || null)
+                      setError(null)
+                    }}
+                  />
                 </label>
                 <label>
                   Backup password
                   <input
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value)
+                      setError(null)
+                    }}
                     placeholder="Backup password"
                   />
                 </label>
-                <button type="submit" className="btn-primary">
-                  Import Vault
+
+                {error && (
+                  <ErrorState
+                    title="Vault Import Error"
+                    error={error}
+                    onDismiss={() => setError(null)}
+                  />
+                )}
+
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  {loading ? 'Decrypting Vault...' : 'Import Vault'}
                 </button>
                 <button type="button" className="btn-text" onClick={() => setMode('welcome')}>
                   {'\u2039'} Back

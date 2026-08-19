@@ -149,9 +149,15 @@ function LoginScreen() {
       return
     }
 
+    const loginRes = await AuthSession.login(recoveryUser, newPassword)
+    if (!loginRes.success) {
+      setRecoveryError(loginRes.error || 'Login after recovery failed')
+      return
+    }
+
     setRecoveryError('')
     setRecoveryOpen(false)
-    setPassword(newPassword)
+    playVaultUnlockSound()
     setUnlocking(true)
     setTimeout(() => navigate('/loading'), 800)
   }

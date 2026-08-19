@@ -129,7 +129,7 @@ export function DeviceApprovalModal() {
               setInputPin(e.target.value)
               setErrorMsg('')
             }}
-            placeholder={`PIN: ${pendingRequest.pinChallenge}`}
+            placeholder="• • • • • •"
             style={{
               width: '100%',
               padding: '10px 14px',

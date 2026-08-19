@@ -195,6 +195,7 @@ function AppLayout() {
       const elapsed = Date.now() - lastActivity
       if (elapsed >= timeoutMs) {
         console.warn(`[Vexta Auto-Lock] Vault auto-locked after ${setting} of inactivity.`)
+        playVaultLockSound()
         AuthSession.logout()
         ;(window as any).vextaNative?.lockVault()
         navigate('/login', { replace: true })
