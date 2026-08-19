@@ -184,7 +184,13 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
     const activeUser = localStorage.getItem('vexta_active_user') || ''
     if (activeUser && name) {
       const db = new VextaDatabaseManager(activeUser)
-      db.setChatTimer(name, val === 'Off' ? null : val)
+      const timerVal = val === 'Off' ? null : val
+      db.setChatTimer(name, timerVal)
+      window.dispatchEvent(
+        new CustomEvent('vexta_chat_timer_updated', {
+          detail: { chatId, name, timer: timerVal },
+        }),
+      )
     }
     showToast(`Disappearing messages set to ${val}`)
   }
@@ -628,6 +634,11 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
                           if (activeUser && name) {
                             const db = new VextaDatabaseManager(activeUser)
                             db.setChatTheme(name, wp.id)
+                            window.dispatchEvent(
+                              new CustomEvent('vexta_chat_theme_updated', {
+                                detail: { chatId, name, themeId: wp.id },
+                              }),
+                            )
                           }
                           showToast(`Chat theme updated to ${wp.label}`)
                         }}

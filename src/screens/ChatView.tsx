@@ -282,11 +282,56 @@ function ChatView({ showInfo = false }: ChatViewProps) {
 
       window.addEventListener('vexta_messages_updated', handleMessagesUpdated)
 
+      const handleThemeUpdated = (e: Event) => {
+        const customEvent = e as CustomEvent<{ chatId?: string; name?: string; themeId?: string }>
+        if (
+          customEvent.detail?.themeId &&
+          (!customEvent.detail.name || customEvent.detail.name === name || customEvent.detail.chatId === chatId)
+        ) {
+          setChatTheme(customEvent.detail.themeId)
+        } else {
+          const t = db.getChatTheme(name)
+          if (t) setChatTheme(t)
+        }
+      }
+      window.addEventListener('vexta_chat_theme_updated', handleThemeUpdated)
+
+      const handleTimerUpdated = (e: Event) => {
+        const customEvent = e as CustomEvent<{ chatId?: string; name?: string; timer?: string | null }>
+        if (
+          customEvent.detail &&
+          (!customEvent.detail.name || customEvent.detail.name === name || customEvent.detail.chatId === chatId)
+        ) {
+          setTimer(customEvent.detail.timer || null)
+        } else {
+          const t = db.getChatTimer(name)
+          setTimer(t || null)
+        }
+      }
+      window.addEventListener('vexta_chat_timer_updated', handleTimerUpdated)
+
+      const handlePinnedUpdated = (e: Event) => {
+        const customEvent = e as CustomEvent<{ chatId?: string; name?: string; text?: string | null }>
+        if (
+          customEvent.detail &&
+          (!customEvent.detail.name || customEvent.detail.name === name || customEvent.detail.chatId === chatId)
+        ) {
+          setPinnedText(customEvent.detail.text || null)
+        } else {
+          const p = db.getPinnedMessage(name)
+          setPinnedText(p || null)
+        }
+      }
+      window.addEventListener('vexta_pinned_updated', handlePinnedUpdated)
+
       return () => {
         clearInterval(pInterval)
         clearInterval(purgeInterval)
         window.removeEventListener('vexta_presence_updated', updatePresence)
         window.removeEventListener('vexta_messages_updated', handleMessagesUpdated)
+        window.removeEventListener('vexta_chat_theme_updated', handleThemeUpdated)
+        window.removeEventListener('vexta_chat_timer_updated', handleTimerUpdated)
+        window.removeEventListener('vexta_pinned_updated', handlePinnedUpdated)
       }
     } else {
       setMessages([])
