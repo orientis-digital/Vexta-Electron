@@ -62,68 +62,101 @@ function FriendsView() {
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
 
   useEffect(() => {
-    const activeUser = localStorage.getItem('vexta_active_user') || ''
-    if (activeUser) {
-      const db = new VextaDatabaseManager(activeUser)
-      const storedContacts = db.getContacts().filter((c) => c.username !== 'Vexta - Global Message')
+    const reloadLocalRoster = () => {
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        const storedContacts = db.getContacts().filter((c) => c.username !== 'Vexta - Global Message')
 
-      const activeFriends: Friend[] = storedContacts
-        .filter((c) => c.status === 'active' || !c.status)
-        .map((c) => ({
-          id: c.username,
-          name: c.username,
-          handle: `@${c.username.toLowerCase()}`,
-          fingerprint: generateFingerprintFromKey(c.public_key || c.username),
-          status: 'online',
-          online: true,
-        }))
-      setFriends(activeFriends)
+        const activeFriends: Friend[] = storedContacts
+          .filter((c) => c.status === 'active' || !c.status)
+          .map((c) => ({
+            id: c.username,
+            name: c.username,
+            handle: `@${c.username.toLowerCase()}`,
+            fingerprint: generateFingerprintFromKey(c.public_key || c.username),
+            status: 'online',
+            online: true,
+          }))
+        setFriends(activeFriends)
 
-      const pendingContacts: PendingRequest[] = storedContacts
-        .filter((c) => c.status === 'pending')
-        .map((c) => ({
-          id: c.username,
-          name: c.username,
-          handle: `@${c.username.toLowerCase()}`,
-          direction: c.direction === 'incoming' ? 'incoming' : 'outgoing',
-          time: 'Pending',
-        }))
-      setPendingRequests(pendingContacts)
+        const pendingContacts: PendingRequest[] = storedContacts
+          .filter((c) => c.status === 'pending')
+          .map((c) => ({
+            id: c.username,
+            name: c.username,
+            handle: `@${c.username.toLowerCase()}`,
+            direction: c.direction === 'incoming' ? 'incoming' : 'outgoing',
+            time: 'Pending',
+          }))
+        setPendingRequests(pendingContacts)
+      }
     }
 
-    bridgeClient.listFriendRequests()
-    bridgeClient.listFriends()
+    reloadLocalRoster()
+
+    try {
+      bridgeClient.listFriendRequests()
+      bridgeClient.listFriends()
+    } catch {}
 
     const unsubRequests = bridgeClient.subscribeFriendRequests((remoteReqs) => {
       if (!Array.isArray(remoteReqs)) return
       const activeUser = localStorage.getItem('vexta_active_user') || ''
-      const mapped: PendingRequest[] = remoteReqs.map((req) => {
-        const isIncoming =
-          req.recipient === activeUser ||
-          (req.recipient && req.recipient.toLowerCase() === activeUser.toLowerCase())
-        const otherUser = isIncoming ? req.sender : req.recipient
-        return {
-          id: String(req.id),
-          name: otherUser,
-          handle: `@${otherUser.toLowerCase()}`,
-          direction: isIncoming ? 'incoming' : 'outgoing',
+      if (!activeUser) return
+
+      const db = new VextaDatabaseManager(activeUser)
+      const localPending = db.getContacts().filter((c) => c.status === 'pending')
+
+      const mapped: PendingRequest[] = [
+        ...localPending.map((c) => ({
+          id: c.username,
+          name: c.username,
+          handle: `@${c.username.toLowerCase()}`,
+          direction: (c.direction === 'incoming' ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
           time: 'Pending',
-        }
-      })
-      setPendingRequests(mapped)
+        })),
+        ...remoteReqs.map((req) => {
+          const isIncoming =
+            req.recipient === activeUser ||
+            (req.recipient && req.recipient.toLowerCase() === activeUser.toLowerCase())
+          const otherUser = isIncoming ? req.sender : req.recipient
+          return {
+            id: String(req.id),
+            name: otherUser,
+            handle: `@${otherUser.toLowerCase()}`,
+            direction: isIncoming ? ('incoming' as const) : ('outgoing' as const),
+            time: 'Pending',
+          }
+        }),
+      ]
+      const uniqueReqs = mapped.filter(
+        (r, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === r.name.toLowerCase()) === idx,
+      )
+      setPendingRequests(uniqueReqs)
     })
 
     const unsubFriends = bridgeClient.subscribeFriends((remoteFriends) => {
       if (!Array.isArray(remoteFriends)) return
-      const mapped: Friend[] = remoteFriends.map((fName) => ({
-        id: fName,
-        name: fName,
-        handle: `@${fName.toLowerCase()}`,
-        fingerprint: generateFingerprintFromKey(fName),
-        status: 'online',
-        online: true,
-      }))
-      setFriends(mapped)
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      if (!activeUser) return
+
+      const db = new VextaDatabaseManager(activeUser)
+      for (const fName of remoteFriends) {
+        if (typeof fName === 'string' && fName.trim() && fName !== 'Vexta - Global Message') {
+          const clean = fName.trim().replace(/^@/, '')
+          const exists = db.getContacts().some((c) => c.username.toLowerCase() === clean.toLowerCase())
+          if (!exists) {
+            db.addContact({
+              username: clean,
+              public_key: clean,
+              created_at: new Date().toISOString(),
+              status: 'active',
+            })
+          }
+        }
+      }
+      reloadLocalRoster()
     })
 
     const handleServerError = (e: Event) => {
@@ -133,11 +166,13 @@ function FriendsView() {
       }
     }
     window.addEventListener('vexta_server_error', handleServerError)
+    window.addEventListener('vexta_contacts_updated', reloadLocalRoster)
 
     return () => {
       unsubRequests()
       unsubFriends()
       window.removeEventListener('vexta_server_error', handleServerError)
+      window.removeEventListener('vexta_contacts_updated', reloadLocalRoster)
     }
   }, [])
 
@@ -147,60 +182,44 @@ function FriendsView() {
   }
 
   function acceptRequest(id: string, name: string) {
-    setPendingRequests((prev) => prev.filter((r) => r.id !== id))
-    setFriends((prev) => [
-      ...prev,
-      {
-        id,
-        name,
-        handle: `@${name.toLowerCase()}`,
-        fingerprint: generateFingerprintFromKey(name),
-        status: 'online',
-        online: true,
-      },
-    ])
+    setPendingRequests((prev) => prev.filter((r) => r.id !== id && r.name !== name))
     const activeUser = localStorage.getItem('vexta_active_user')
     if (activeUser) {
       const db = new VextaDatabaseManager(activeUser)
       db.addContact({
         username: name,
-        public_key: 'PENDING_KEY',
-        display_name: name,
+        public_key: name,
         created_at: new Date().toISOString(),
         status: 'active',
       })
-      bridgeClient.acceptFriendRequest(id)
-      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
-      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_contacts_updated'))
     }
+    bridgeClient.acceptFriendRequest(id)
     showToast(`Accepted friend request from ${name}`)
   }
 
   function rejectRequest(id: string, name: string) {
-    setPendingRequests((prev) => prev.filter((r) => r.id !== id))
+    setPendingRequests((prev) => prev.filter((r) => r.id !== id && r.name !== name))
     const activeUser = localStorage.getItem('vexta_active_user')
     if (activeUser) {
       const db = new VextaDatabaseManager(activeUser)
       db.removeContact(name)
-      bridgeClient.rejectFriendRequest(id)
-      window.dispatchEvent(new CustomEvent('vexta_friend_request_updated'))
-      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_contacts_updated'))
     }
+    bridgeClient.rejectFriendRequest(id)
     showToast(`Rejected friend request from ${name}`)
   }
 
   function removeFriend(id: string, name: string) {
-    setFriends((prev) => prev.filter((f) => f.id !== id))
+    setFriends((prev) => prev.filter((f) => f.id !== id && f.name !== name))
     const activeUser = localStorage.getItem('vexta_active_user')
     if (activeUser) {
       const db = new VextaDatabaseManager(activeUser)
       db.removeContact(name)
-      db.clearMessages(name)
-      bridgeClient.removeFriend(name)
-      window.dispatchEvent(new CustomEvent('vexta_contact_removed', { detail: { name } }))
-      window.dispatchEvent(new CustomEvent('vexta_roster_updated'))
+      window.dispatchEvent(new CustomEvent('vexta_contacts_updated'))
     }
-    showToast(`Removed ${name} from contacts`)
+    bridgeClient.removeFriend(name)
+    showToast(`Removed ${name} from friends`)
   }
 
   async function handleAddFriend(e: React.FormEvent) {
