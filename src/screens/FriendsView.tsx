@@ -289,7 +289,7 @@ function FriendsView() {
           onClick={() => setTab('active')}
         >
           <PeopleIcon size={14} />
-          <span>Active Friends ({friends.length})</span>
+          <span>Friend List ({friends.length})</span>
         </button>
         <button
           type="button"
@@ -309,7 +309,7 @@ function FriendsView() {
         </button>
       </div>
 
-      {/* TAB 1: ACTIVE FRIENDS */}
+      {/* TAB 1: FRIEND LIST */}
       {tab === 'active' && (
         <div className="friends-grid">
           {friends.map((f) => (
