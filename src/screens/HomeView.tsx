@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   GearIcon,
   GroupIcon,
+  MegaphoneIcon,
   PeopleIcon,
   PlusIcon,
   ServerIcon,
@@ -106,10 +107,10 @@ function HomeView() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => navigate('/chat/group_Ghost%20Protocol')}
+            onClick={() => navigate('/chat/Vexta%20-%20Global%20Message')}
           >
-            <GroupIcon size={14} />
-            Ghost Protocol
+            <MegaphoneIcon size={14} />
+            Global Announcements
           </button>
           <Link to="/settings" className="btn-secondary">
             <GearIcon size={14} />

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { VextaDatabaseManager } from '../crypto/db_manager'
 import { bridgeClient } from '../network/bridge'
+import { generateFingerprintFromKey } from '../crypto/identity'
 import {
   CheckIcon,
   CloseIcon,
@@ -71,7 +72,7 @@ function FriendsView() {
           id: c.username,
           name: c.username,
           handle: `@${c.username.toLowerCase()}`,
-          fingerprint: '4A8F : 9B1C : 2E3D : 8F7A',
+          fingerprint: generateFingerprintFromKey(c.public_key || c.username),
           status: 'online',
           online: true,
         }))
@@ -117,7 +118,7 @@ function FriendsView() {
         id: fName,
         name: fName,
         handle: `@${fName.toLowerCase()}`,
-        fingerprint: '7F3A : 91B2 : C4E5 : 7091',
+        fingerprint: generateFingerprintFromKey(fName),
         status: 'online',
         online: true,
       }))
@@ -152,7 +153,7 @@ function FriendsView() {
         id,
         name,
         handle: `@${name.toLowerCase()}`,
-        fingerprint: '7F3A : 91B2 : C4E5 : 7091',
+        fingerprint: generateFingerprintFromKey(name),
         status: 'online',
         online: true,
       },
@@ -259,7 +260,9 @@ function FriendsView() {
     setUsername('')
   }
 
-  const myIdentityUri = 'vexta://identity/Guest?fingerprint=4A8F9B1C2E3D8F7A'
+  const activeUser = localStorage.getItem('vexta_active_user') || 'User'
+  const myFingerprintRaw = generateFingerprintFromKey(activeUser).replace(/[: ]/g, '')
+  const myIdentityUri = `vexta://identity/${activeUser}?fingerprint=${myFingerprintRaw}`
 
   return (
     <div className="screen-pane friends-screen">

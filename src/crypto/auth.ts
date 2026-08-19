@@ -134,3 +134,39 @@ export async function recoverAccount(
   localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts))
   return { success: true }
 }
+
+export async function changePassword(
+  username: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ success: boolean; error?: string }> {
+  const accounts = getRegisteredAccounts()
+  const cleanName = username.trim()
+  const account = accounts.find((a) => a.username.toLowerCase() === cleanName.toLowerCase())
+
+  if (!account) {
+    return { success: false, error: `Account '@${cleanName}' not found` }
+  }
+
+  const currentHash = await hashPasswordWithSalt(currentPassword, account.saltHex)
+  if (account.passwordHashHex && currentHash !== account.passwordHashHex) {
+    return { success: false, error: 'Current Master Password is incorrect' }
+  }
+
+  if (newPassword.length < 8) {
+    return { success: false, error: 'New password must be at least 8 characters' }
+  }
+
+  // Generate fresh salt and update password hash
+  const newSaltHex = generateSaltHex(16)
+  account.saltHex = newSaltHex
+  account.passwordHashHex = await hashPasswordWithSalt(newPassword, newSaltHex)
+
+  localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts))
+
+  // Re-derive master key for current session
+  await deriveMasterKey(newPassword, newSaltHex)
+
+  return { success: true }
+}
+

@@ -102,9 +102,10 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
   const [notice, setNotice] = useState<string | null>(null)
 
   // Group members state
-  const [members, setMembers] = useState<Member[]>([
-    { name: 'Guest (You)', role: 'Creator', online: true },
-  ])
+  const [members, setMembers] = useState<Member[]>(() => {
+    const activeUser = localStorage.getItem('vexta_active_user')
+    return activeUser ? [{ name: `${activeUser} (You)`, role: 'Creator', online: true }] : []
+  })
   const [newMemberName, setNewMemberName] = useState('')
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [sharedTransfers, setSharedTransfers] = useState<any[]>([])
@@ -166,7 +167,14 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
             online: true,
           })),
         )
+      } else {
+        setMembers([{ name: `${activeUser} (You)`, role: 'Creator', online: true }])
       }
+    } else {
+      setMembers([
+        { name: `${activeUser} (You)`, role: 'Creator', online: true },
+        { name, role: 'Member', online: true },
+      ])
     }
   }, [name, isGroup])
 
@@ -213,40 +221,47 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
   }
 
   function handleExport(format: 'txt' | 'json') {
+    const activeUser = localStorage.getItem('vexta_active_user') || 'User'
+    const db = new VextaDatabaseManager(activeUser)
+    const msgs = db.getMessages(chatId)
     const timestamp = new Date().toISOString()
-    const content =
-      format === 'json'
-        ? JSON.stringify(
-            {
-              chatId,
-              name,
-              exportedAt: timestamp,
-              securityFingerprint: fingerprint,
-              messages: [
-                {
-                  id: 1,
-                  sender: isGroup ? 'The Watcher' : name,
-                  text: 'All comms encrypted. Key handshake verified on both ends.',
-                  timestamp: '09:41',
-                },
-                {
-                  id: 2,
-                  sender: 'Guest',
-                  text: 'Acknowledged. Rotating session keys now.',
-                  timestamp: '09:42',
-                },
-                {
-                  id: 3,
-                  sender: isGroup ? 'The Watcher' : name,
-                  text: 'Rendezvous point is clean. Proceed with the exchange.',
-                  timestamp: '09:43',
-                },
-              ],
-            },
-            null,
-            2,
-          )
-        : `=== VEXTA ENCRYPTED CHAT TRANSCRIPT ===\nChat: ${name}\nID: ${chatId}\nExported: ${timestamp}\nFingerprint: ${fingerprint}\n\n(No messages recorded in local vault)\n`
+
+    let content = ''
+    if (format === 'json') {
+      content = JSON.stringify(
+        {
+          chatId,
+          name,
+          exportedBy: activeUser,
+          exportedAt: timestamp,
+          securityFingerprint: fingerprint,
+          messagesCount: msgs.length,
+          messages: msgs.map((m) => ({
+            id: m.id,
+            sender: m.sender,
+            recipient: m.recipient,
+            text: m.ciphertext,
+            timestamp: m.timestamp,
+            attachment: m.attachment?.name ? { name: m.attachment.name, size: m.attachment.size } : undefined,
+          })),
+        },
+        null,
+        2,
+      )
+    } else {
+      const msgLines =
+        msgs.length > 0
+          ? msgs
+              .map(
+                (m) =>
+                  `[${m.timestamp}] ${m.sender}: ${
+                    m.ciphertext || (m.attachment?.name ? `[Attachment: ${m.attachment.name}]` : '[Media]')
+                  }`,
+              )
+              .join('\n')
+          : '(No messages recorded in local vault)'
+      content = `=== VEXTA ENCRYPTED CHAT TRANSCRIPT ===\nChat: ${name}\nID: ${chatId}\nExported By: @${activeUser}\nExported At: ${timestamp}\nSecurity Fingerprint: ${fingerprint}\n\n${msgLines}\n`
+    }
 
     const blob = new Blob([content], {
       type: format === 'json' ? 'application/json' : 'text/plain;charset=utf-8',

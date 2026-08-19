@@ -183,13 +183,7 @@ export class VextaDatabaseManager {
       }
 
       if (!localStorage.getItem(`${this.storageKey}_server_trust`)) {
-        localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify([
-          {
-            server_host: 'vexta-api.nexusec.space',
-            server_fingerprint: '7F:3A:91:B2:C4:E5:70:91',
-            trusted_at: new Date().toISOString(),
-          },
-        ]))
+        localStorage.setItem(`${this.storageKey}_server_trust`, JSON.stringify([]))
       }
     } catch (err: any) {
       console.error('[Vexta DB] Error initializing tables:', err)
