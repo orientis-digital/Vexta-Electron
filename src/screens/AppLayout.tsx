@@ -260,15 +260,27 @@ function AppLayout() {
   useEffect(() => {
     const handleRosterUpdate = () => {
       setContacts(loadUserContacts())
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        const pending = db.getContacts().filter((c) => c.status === 'pending' && c.direction === 'incoming')
+        setPendingRequestsCount(pending.length)
+      }
     }
 
     window.addEventListener('vexta_roster_updated', handleRosterUpdate)
+    window.addEventListener('vexta_contacts_updated', handleRosterUpdate)
+    window.addEventListener('vexta_contact_added', handleRosterUpdate)
     window.addEventListener('vexta_contact_removed', handleRosterUpdate)
+    window.addEventListener('vexta_friend_request_updated', handleRosterUpdate)
     window.addEventListener('vexta_messages_updated', handleRosterUpdate)
 
     return () => {
       window.removeEventListener('vexta_roster_updated', handleRosterUpdate)
+      window.removeEventListener('vexta_contacts_updated', handleRosterUpdate)
+      window.removeEventListener('vexta_contact_added', handleRosterUpdate)
       window.removeEventListener('vexta_contact_removed', handleRosterUpdate)
+      window.removeEventListener('vexta_friend_request_updated', handleRosterUpdate)
       window.removeEventListener('vexta_messages_updated', handleRosterUpdate)
     }
   }, [])
@@ -292,7 +304,21 @@ function AppLayout() {
     const unsub = bridgeClient.subscribeStatus(setBridgeStatus)
 
     const unsubRequests = bridgeClient.subscribeFriendRequests((reqs) => {
-      setPendingRequestsCount(reqs ? reqs.length : 0)
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      let remoteCount = 0
+      if (Array.isArray(reqs)) {
+        remoteCount = reqs.filter(
+          (r) =>
+            r.recipient === activeUser ||
+            (r.recipient && r.recipient.toLowerCase() === activeUser.toLowerCase()),
+        ).length
+      }
+      let localCount = 0
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        localCount = db.getContacts().filter((c) => c.status === 'pending' && c.direction === 'incoming').length
+      }
+      setPendingRequestsCount(Math.max(remoteCount, localCount))
     })
     bridgeClient.listFriendRequests()
 
@@ -402,9 +428,16 @@ function AppLayout() {
         })
       }
       setContacts(loadUserContacts())
+      const activeUser = localStorage.getItem('vexta_active_user') || ''
+      if (activeUser) {
+        const db = new VextaDatabaseManager(activeUser)
+        const pending = db.getContacts().filter((c) => c.status === 'pending' && c.direction === 'incoming')
+        setPendingRequestsCount(pending.length)
+      }
     }
     window.addEventListener('vexta_messages_cleared', reloadContacts)
     window.addEventListener('vexta_messages_updated', reloadContacts)
+    window.addEventListener('vexta_contacts_updated', reloadContacts)
     window.addEventListener('vexta_contact_removed', reloadContacts)
     window.addEventListener('vexta_contact_added', reloadContacts)
     window.addEventListener('vexta_friend_request_updated', reloadContacts)
@@ -416,6 +449,7 @@ function AppLayout() {
       unsubRequests()
       window.removeEventListener('vexta_messages_cleared', reloadContacts)
       window.removeEventListener('vexta_messages_updated', reloadContacts)
+      window.removeEventListener('vexta_contacts_updated', reloadContacts)
       window.removeEventListener('vexta_contact_removed', reloadContacts)
       window.removeEventListener('vexta_contact_added', reloadContacts)
       window.removeEventListener('vexta_friend_request_updated', reloadContacts)
