@@ -1741,7 +1741,7 @@ function SettingsView() {
               </p>
               <div className="card-actions" style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <a
-                  href="https://github.com/orientis-digital/vexta-public"
+                  href="https://github.com/orientis-digital/Vexta-Electron"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-secondary"
