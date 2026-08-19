@@ -14,6 +14,7 @@ import {
   ShieldIcon,
   UserPlusIcon,
 } from '../components/icons'
+import { QRCodeSVG } from '../components/QRCode'
 import { EmptyState } from '../components/EmptyState'
 
 type Tab = 'active' | 'pending' | 'add'
@@ -524,33 +525,27 @@ function FriendsView() {
               Scan from mobile or send this identity payload to add you on Vexta.
             </p>
 
-            <div className="qr-container">
-              <svg className="qr-svg" viewBox="0 0 200 200" fill="currentColor">
-                <rect width="200" height="200" fill="#1e1e1e" rx="12" />
-                <rect x="20" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="130" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="140" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="150" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="20" y="130" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="140" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="150" width="10" height="10" fill="#39ff14" rx="1" />
-
-                {[
-                  [80, 20], [90, 20], [110, 20], [80, 40], [100, 40],
-                  [80, 70], [90, 80], [120, 80], [150, 80],
-                  [20, 90], [40, 100], [80, 100], [110, 100], [140, 100],
-                  [30, 110], [90, 120], [120, 110], [150, 120]
-                ].map(([x, y], idx) => (
-                  <rect key={idx} x={x} y={y} width="10" height="10" fill="#39ff14" rx="1" />
-                ))}
-              </svg>
+            <div className="qr-container" style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}>
+              <QRCodeSVG
+                value={myIdentityUri}
+                size={200}
+                fgColor="#39ff14"
+                bgColor="#141414"
+              />
             </div>
 
-            <div className="modal-actions">
+            <div className="modal-actions" style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(myIdentityUri).catch(() => {})
+                  showToast('Identity URI copied to clipboard')
+                }}
+              >
+                <CopyIcon size={14} />
+                Copy Identity Link
+              </button>
               <button type="button" className="btn-ghost" onClick={() => setShareQrOpen(false)}>
                 Close
               </button>

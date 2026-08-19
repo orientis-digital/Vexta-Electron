@@ -19,6 +19,7 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from '../components/icons'
+import { QRCodeSVG } from '../components/QRCode'
 
 type SectionKey = 'security' | 'members' | 'theme' | 'data'
 
@@ -763,32 +764,13 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
               Scan with Vexta or copy the identity string to verify the safety fingerprint.
             </p>
 
-            <div className="qr-container">
-              <svg className="qr-svg" viewBox="0 0 200 200" fill="currentColor">
-                <rect width="200" height="200" fill="#1e1e1e" rx="12" />
-                <rect x="20" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="130" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="140" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="150" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="20" y="130" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="140" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="150" width="10" height="10" fill="#39ff14" rx="1" />
-
-                {[
-                  [80, 20], [90, 20], [110, 20], [80, 40], [100, 40], [110, 50],
-                  [80, 70], [90, 80], [100, 70], [120, 80], [150, 80], [170, 80],
-                  [20, 90], [40, 100], [60, 90], [80, 100], [110, 100], [140, 100], [160, 90],
-                  [30, 110], [50, 110], [90, 120], [120, 110], [150, 120], [170, 110],
-                  [80, 140], [100, 150], [110, 140], [140, 140], [160, 150], [170, 130],
-                  [90, 170], [120, 160], [130, 170], [150, 170], [170, 160], [180, 180]
-                ].map(([x, y], idx) => (
-                  <rect key={idx} x={x} y={y} width="10" height="10" fill="#39ff14" rx="1" />
-                ))}
-              </svg>
+            <div className="qr-container" style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}>
+              <QRCodeSVG
+                value={`vexta://identity/${encodeURIComponent(name)}?fingerprint=${fingerprint.replace(/\s+:\s+/g, '')}`}
+                size={200}
+                fgColor="#39ff14"
+                bgColor="#141414"
+              />
             </div>
 
             <div className="modal-field">

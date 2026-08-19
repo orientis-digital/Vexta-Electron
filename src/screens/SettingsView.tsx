@@ -20,6 +20,7 @@ import {
   VolumeIcon,
   KeyboardIcon,
 } from '../components/icons'
+import { QRCodeSVG } from '../components/QRCode'
 
 import { bridgeClient } from '../network/bridge'
 import { exportVault, importVault, hashPasscode } from '../crypto/vault_backup'
@@ -1787,35 +1788,28 @@ function SettingsView() {
               Scan this QR code from Vexta Android or Vexta Desktop to pair identity keys.
             </p>
 
-            <div className="qr-container">
-              <svg className="qr-svg" viewBox="0 0 200 200" fill="currentColor">
-                <rect width="200" height="200" fill="#1e1e1e" rx="12" />
-                <rect x="20" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="130" y="20" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="140" y="30" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="150" y="40" width="10" height="10" fill="#39ff14" rx="1" />
-
-                <rect x="20" y="130" width="50" height="50" fill="#39ff14" rx="4" />
-                <rect x="30" y="140" width="30" height="30" fill="#1e1e1e" rx="2" />
-                <rect x="40" y="150" width="10" height="10" fill="#39ff14" rx="1" />
-
-                {[
-                  [80, 20], [90, 20], [110, 20], [80, 40], [100, 40],
-                  [80, 70], [90, 80], [120, 80], [150, 80],
-                  [20, 90], [40, 100], [80, 100], [110, 100], [140, 100],
-                  [30, 110], [90, 120], [120, 110], [150, 120],
-                  [80, 140], [100, 150], [140, 140], [160, 150],
-                  [90, 170], [120, 160], [150, 170]
-                ].map(([x, y], idx) => (
-                  <rect key={idx} x={x} y={y} width="10" height="10" fill="#39ff14" rx="1" />
-                ))}
-              </svg>
+            <div className="qr-container" style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}>
+              <QRCodeSVG
+                value={`vexta://link-device?user=${encodeURIComponent(activeUser)}&bridge=${encodeURIComponent(bridgeUrl)}`}
+                size={200}
+                fgColor="#39ff14"
+                bgColor="#141414"
+              />
             </div>
 
-            <div className="modal-actions">
+            <div className="modal-actions" style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  const uri = `vexta://link-device?user=${encodeURIComponent(activeUser)}&bridge=${encodeURIComponent(bridgeUrl)}`
+                  navigator.clipboard.writeText(uri)
+                  showToast('Pairing URI copied to clipboard')
+                }}
+              >
+                <CopyIcon size={14} />
+                Copy Pairing URI
+              </button>
               <button type="button" className="btn-ghost" onClick={() => setPairQrOpen(false)}>
                 Close
               </button>
