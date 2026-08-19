@@ -7,6 +7,7 @@ import {
   VideoIcon,
   CloseIcon,
   ShieldIcon,
+  Laptop,
 } from './icons'
 
 function RemoteVideoTile({ peerId, stream }: { peerId: string; stream: MediaStream }) {
@@ -370,7 +371,7 @@ export function CallModal() {
             onClick={() => webrtcManager.toggleMute()}
           >
             <MicIcon size={20} />
-            <span>{callState.isMuted ? 'Unmuted' : 'Mute'}</span>
+            <span>{callState.isMuted ? 'Unmute' : 'Mute'}</span>
           </button>
 
           <button
@@ -389,7 +390,7 @@ export function CallModal() {
             title="Share Screen"
             onClick={() => webrtcManager.toggleScreenShare()}
           >
-            <ShieldIcon size={20} />
+            <Laptop size={20} />
             <span>{callState.isScreenSharing ? 'Stop Share' : 'Screen Share'}</span>
           </button>
 
