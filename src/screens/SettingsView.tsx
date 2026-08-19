@@ -318,21 +318,16 @@ function SettingsView() {
         .replace(/^ws:\/\//, 'http://')
         .replace(/\/ws\/chat\/?$/, '/api/v1/health')
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3500)
+      const timeoutId = setTimeout(() => controller.abort(), 4000)
 
-      try {
-        await fetch(httpEndpoint, { method: 'HEAD', signal: controller.signal, mode: 'no-cors' })
-      } catch {
-        // Roundtrip is still measured
-      }
+      await fetch(httpEndpoint, { method: 'HEAD', signal: controller.signal, mode: 'no-cors' })
       clearTimeout(timeoutId)
       const latency = Math.max(1, Math.round(performance.now() - startTime))
       setPingLatency(latency)
       showToast(`Bridge ping successful \u00B7 ${latency}ms latency`)
     } catch {
-      const fallbackLatency = Math.floor(18 + Math.random() * 12)
-      setPingLatency(fallbackLatency)
-      showToast(`Bridge ping successful \u00B7 ${fallbackLatency}ms latency`)
+      setPingLatency(null)
+      showToast('Bridge ping failed \u00B7 Endpoint unreachable or timed out')
     } finally {
       setTestingPing(false)
     }
