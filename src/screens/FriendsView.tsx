@@ -70,14 +70,20 @@ function FriendsView() {
 
         const activeFriends: Friend[] = storedContacts
           .filter((c) => c.status === 'active' || !c.status)
-          .map((c) => ({
-            id: c.username,
-            name: c.username,
-            handle: `@${c.username.toLowerCase()}`,
-            fingerprint: generateFingerprintFromKey(c.public_key || c.username),
-            status: 'online',
-            online: true,
-          }))
+          .map((c) => {
+            const lastActiveStr = db.getContactLastActive(c.username)
+            const lastActiveTime = lastActiveStr ? new Date(lastActiveStr).getTime() : 0
+            const isOnline = !isNaN(lastActiveTime) && lastActiveTime > 0 && Date.now() - lastActiveTime < 2 * 60 * 1000
+
+            return {
+              id: c.username,
+              name: c.username,
+              handle: `@${c.username.toLowerCase()}`,
+              fingerprint: generateFingerprintFromKey(c.public_key || c.username),
+              status: isOnline ? 'online' : 'offline',
+              online: isOnline,
+            }
+          })
         setFriends(activeFriends)
 
         const pendingContacts: PendingRequest[] = storedContacts
@@ -336,7 +342,7 @@ function FriendsView() {
               <div className="friend-card-top">
                 <div className="friend-avatar" style={avatarStyle(f.name)}>
                   {f.name.charAt(0).toUpperCase()}
-                  {f.online && <span className="presence-dot" />}
+                  <span className={`presence-dot ${f.online ? 'online' : 'offline'}`} title={f.online ? 'Online' : 'Offline'} />
                 </div>
                 <div className="friend-meta">
                   <span className="friend-name">{f.name}</span>

@@ -529,7 +529,7 @@ function ChatInfoView({ chatId: chatIdProp, onClose }: ChatInfoViewProps) {
                       <div key={m.name} className="roster-item">
                         <div className="roster-avatar" style={avatarStyle(m.name)}>
                           {m.name.charAt(0).toUpperCase()}
-                          {m.online && <span className="presence-dot" />}
+                          <span className={`presence-dot ${m.online ? 'online' : 'offline'}`} title={m.online ? 'Online' : 'Offline'} />
                         </div>
 
                         <div className="roster-info">
