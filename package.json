@@ -36,6 +36,12 @@
     "appId": "com.orientisdigital.vexta",
     "productName": "Vexta",
     "icon": "public/icon.png",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://downloads.nexusec.space/vexta/"
+      }
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
