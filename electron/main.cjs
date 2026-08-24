@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification, session, desktopCapturer, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, Notification, session, desktopCapturer, shell, dialog } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -260,6 +260,232 @@ function registerShortcuts() {
       }
     }
   })
+}
+
+function showAboutDialog() {
+  const info = getSystemInfo()
+  const detailText = [
+    'Zero-Knowledge End-to-End Encrypted Messenger',
+    '',
+    `App Version: v${info.appVersion}`,
+    `Platform: ${info.osName} (${info.arch})`,
+    `Electron: ${process.versions.electron}`,
+    `Chromium: ${process.versions.chrome}`,
+    `Node.js: ${process.versions.node}`,
+    '',
+    '© Orientis Digital. All rights reserved.'
+  ].join('\n')
+
+  const dialogOpts = {
+    type: 'info',
+    title: 'About Vexta',
+    message: `Vexta Messenger v${info.appVersion}`,
+    detail: detailText,
+    buttons: ['OK'],
+  }
+
+  const iconPath = path.join(__dirname, '../public/icon.png')
+  if (fs.existsSync(iconPath)) {
+    dialogOpts.icon = iconPath
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    dialog.showMessageBox(mainWindow, dialogOpts).catch(() => {})
+  } else {
+    dialog.showMessageBox(dialogOpts).catch(() => {})
+  }
+}
+
+function createApplicationMenu() {
+  const isMac = process.platform === 'darwin'
+
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        {
+          label: `About ${app.name}`,
+          click: () => showAboutDialog()
+        },
+        { type: 'separator' },
+        {
+          label: 'Lock Vault',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('lock-vault')
+            }
+          }
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        {
+          label: `Quit ${app.name}`,
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            app.isQuitting = true
+            app.quit()
+          }
+        }
+      ]
+    }] : []),
+
+    {
+      label: '&File',
+      submenu: [
+        {
+          label: 'Lock Vault',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('lock-vault')
+            }
+          }
+        },
+        {
+          label: 'Open User Data Directory',
+          click: () => {
+            shell.openPath(app.getPath('userData')).catch(() => {})
+          }
+        },
+        {
+          label: 'Open Downloads Directory',
+          click: () => {
+            shell.openPath(app.getPath('downloads')).catch(() => {})
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Check for Updates...',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('trigger-check-updates')
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Restart Application',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => {
+            app.isQuitting = true
+            app.relaunch()
+            app.exit(0)
+          }
+        },
+        ...(!isMac ? [
+          { type: 'separator' },
+          {
+            label: 'Exit',
+            accelerator: 'CmdOrCtrl+Q',
+            click: () => {
+              app.isQuitting = true
+              app.quit()
+            }
+          }
+        ] : [])
+      ]
+    },
+
+    {
+      label: '&Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' }
+      ]
+    },
+
+    {
+      label: '&View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        {
+          label: 'Toggle Developer Tools',
+          accelerator: isMac ? 'Alt+Command+I' : 'Ctrl+Shift+I',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.toggleDevTools()
+            }
+          }
+        },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+
+    {
+      label: '&Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac ? [
+          { type: 'separator' },
+          { role: 'front' },
+          { type: 'separator' },
+          { role: 'window' }
+        ] : [
+          {
+            label: 'Close to Tray',
+            accelerator: 'CmdOrCtrl+W',
+            click: () => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.hide()
+              }
+            }
+          }
+        ])
+      ]
+    },
+
+    {
+      label: '&Help',
+      submenu: [
+        {
+          label: 'Documentation & Guides',
+          click: () => {
+            shell.openExternal('https://github.com/orientis-digital/Vexta-Electron').catch(() => {})
+          }
+        },
+        {
+          label: 'Zero-Knowledge Security Architecture',
+          click: () => {
+            shell.openExternal('https://github.com/orientis-digital/Vexta-Electron#security').catch(() => {})
+          }
+        },
+        {
+          label: 'Report an Issue',
+          click: () => {
+            shell.openExternal('https://github.com/orientis-digital/Vexta-Electron/issues').catch(() => {})
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'About Vexta',
+          click: () => showAboutDialog()
+        }
+      ]
+    }
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
 }
 
 function generateObfuscatedFilename(originalName = 'photo.jpg') {
@@ -706,6 +932,7 @@ app.whenReady().then(() => {
 
   createWindow()
   createTray()
+  createApplicationMenu()
   registerShortcuts()
 })
 

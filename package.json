@@ -1,7 +1,7 @@
 {
   "name": "vexta",
   "private": true,
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Vexta Zero-Knowledge Encrypted Messenger",
   "license": "MIT",
   "author": "Vexta Team <orientisdigital.official@gmail.com>",
@@ -58,12 +58,31 @@
       "signAndEditExecutable": false,
       "target": [
         {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "zip",
           "arch": [
             "x64"
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vexta"
     },
     "mac": {
       "icon": "public/icon.png",

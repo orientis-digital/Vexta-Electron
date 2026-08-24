@@ -256,14 +256,14 @@ mkdir -p release
 
 case "$TARGET_PLATFORM" in
     win)
-        log_info "Running electron-builder Windows target (64-bit x64)..."
-        npx electron-builder --win --x64
+        log_info "Running electron-builder Windows targets (NSIS Setup .exe, Portable .exe, ZIP x64)..."
+        npx electron-builder --win nsis portable zip --x64
         ;;
     all)
         log_info "Running electron-builder Linux targets..."
         npx electron-builder --linux
-        log_info "Running electron-builder Windows targets (64-bit x64)..."
-        npx electron-builder --win --x64
+        log_info "Running electron-builder Windows targets (NSIS Setup .exe, Portable .exe, ZIP x64)..."
+        npx electron-builder --win nsis portable zip --x64
         ;;
     *)
         log_info "Running electron-builder Linux targets (AppImage, deb, tar.gz)..."

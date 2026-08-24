@@ -1,0 +1,27 @@
+# <emoji> <type> (<scope>): <description>
+# 
+# - <detailed technical change 1>
+# - <detailed technical change 2>
+# 
+# NOTES:
+# - <optional note, migration instruction, or warning whenever needed>
+#
+# Types:
+# 📦 new       - Adding code
+# 🔧 update    - Changing code
+# 🗑️ remove    - Removing code
+# 🔒 security  - Security fixes
+# ⚙️ setup     - Project configs
+# ☕ chore     - Maintenance
+# 🧪 test      - Tests
+# 📖 docs      - Documentation
+# 🚀 release   - Version releases
+#
+# Rules:
+# - Use present tense
+# - Lowercase type and description
+# - No period at end of subject line
+# - Max 72 chars for subject line
+# - Always list detailed technical changes in the body
+# - Include a NOTES: section whenever needed by the commit
+
